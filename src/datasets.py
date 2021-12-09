@@ -25,26 +25,23 @@
 import dataclasses
 import itertools
 
-import torch
 import numpy as np
+import torch
 
 from pathlib import Path
 from xml.etree import ElementTree
 
 from PIL import Image
-import torchvision
-
-
-__all__ = ['UADetracDetectionDataset']
-
-
-@dataclasses.dataclass(frozen=True)
-class SeqBoxesIndex:
-    seq_idx: int
-    img_idx: int
+from torch.utils.data import DataLoader
+from torchvision import transforms as T
 
 
 class UADetracDetectionDataset(torch.utils.data.Dataset):
+    @dataclasses.dataclass(frozen=True)
+    class _SeqBoxesIndex:
+        seq_idx: int
+        img_idx: int
+    
     def __init__(
         self,
         root_path,
@@ -53,6 +50,7 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
         past_context=0,
         future_context=0,
         context_stride=1,
+        group_horizontal_flip=None,
         transforms=None
     ):
         self._context_rel_idxs = _calc_context_rel_idxs(
@@ -63,6 +61,7 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
         self._seq_img_paths = []
         self._seq_boxes = []
 
+        self.group_horizontal_flip = group_horizontal_flip
         self.transforms = transforms
 
         self._init_data_indices(root_path, subset)
@@ -97,11 +96,9 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
 
             prev_idx = idx
         
-        # TODO Resolve issues regarding different no. of targets per frame.
         imgs = torch.stack(imgs)
-        boxes = torch.tensor(boxes)
 
-        return imgs, boxes
+        return imgs
 
     def __len__(self):
         """Returns the length of the dataset. It represents the number of
@@ -144,7 +141,7 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
                 seq_img_file_paths.append(img_file_path)
                 seq_img_boxes.append(boxes)
 
-                seq_boxes_idx = SeqBoxesIndex(seq_idx, img_idx)
+                seq_boxes_idx = self._SeqBoxesIndex(seq_idx, img_idx)
                 self._global_to_local_seq_img_idxs.append(seq_boxes_idx)
             
             self._seq_img_paths.append(seq_img_file_paths)
@@ -204,6 +201,37 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
             yield frame_num, boxes
 
 
+def collate_context_imgs_batch(batch):
+    return torch.cat(batch, dim=0)
+
+
+def make_uadetrac_dataset(cfg):
+    to_tensor = T.ToTensor()
+    normalize = T.Normalize(cfg.DATASET.IMG_MEAN, cfg.DATASET.IMG_STD)
+    transforms = T.Compose([to_tensor, normalize])
+
+    dataset = UADetracDetectionDataset(
+        cfg.DATASET.ROOT_PATH, cfg.DATASET.SUBSET,
+        past_context=cfg.DATASET.PAST_CONTEXT,
+        future_context=cfg.DATASET.FUTURE_CONTEXT,
+        context_stride=cfg.DATASET.CONTEXT_STRIDE,
+        group_horizontal_flip=cfg.DATASET.GROUP_HORIZONTAL_FLIP,
+        transforms=transforms
+    )
+
+    return dataset
+
+
+def make_data_loader(cfg, dataset, collate_fn=collate_context_imgs_batch):
+    data_loader = DataLoader(
+        dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
+        shuffle=cfg.DATA_LOADER.SHUFFLE,
+        num_workers=cfg.DATA_LOADER.NUM_WORKERS, collate_fn=collate_fn
+    )
+
+    return data_loader
+
+
 def _calc_context_rel_idxs(past_context, future_context, context_stride):
     assert past_context >= 0
     assert future_context >= 0
@@ -220,24 +248,81 @@ def _calc_context_rel_idxs(past_context, future_context, context_stride):
 
 if __name__ == '__main__':
     import cv2 as cv
+    import torch.nn.functional as F
 
-    from torch.utils.data import DataLoader
-    from torchvision import transforms as T
+    from config import cfg
 
-    img_mean = [0.485, 0.456, 0.406]
-    img_std = [0.229, 0.224, 0.225]
+    class ImgBatchVisualizer:
+        def __init__(
+            self,
+            cfg,
+            *,
+            max_size=None,
+            win_name='Batch Preview',
+            quit_key='q'
+        ):
+            self.img_mean = cfg.DATASET.IMG_MEAN
+            self.img_std = cfg.DATASET.IMG_STD
 
-    transforms = T.Compose([T.ToTensor(), T.Normalize(img_mean, img_std)])
+            context_size = cfg.DATASET.PAST_CONTEXT + cfg.DATASET.FUTURE_CONTEXT
+            self.temporal_win_size = 1 + context_size
 
-    dataset = UADetracDetectionDataset(
-        '../../../datasets/UA-DETRAC', transforms=transforms
-    )
-    data_loader = DataLoader(dataset, batch_size=4, shuffle=True)
-
-    for batch_idx, (imgs, boxes) in enumerate(data_loader, start=1):
-        if batch_idx > 2:
-            break
+            self.max_size = max_size
+            self.win_name = win_name
+            self.quit_key = quit_key
         
-        print(f"{imgs.shape} {boxes.shape}")
+        def __enter__(self):
+            cv.namedWindow(self.win_name)
+            return self
+        
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            cv.destroyWindow(self.win_name)
 
-    dataloader = None
+        def show_imgs(self, imgs_tensor):
+            *_, height, width = imgs_tensor.shape
+
+            if self.max_size is not None:
+                max_side = max(height, width)
+                if max_side > self.max_size:
+                    scale = self.max_size / max_side
+                    imgs_tensor = F.interpolate(
+                        imgs_tensor, scale_factor=scale, mode='bicubic',
+                        align_corners=True
+                    )
+            
+            imgs = imgs_tensor.cpu().numpy()  # [B,C,H,W]
+            imgs = np.transpose(imgs, (0, 2, 3, 1))  # [B,H,W,C]
+            imgs = imgs[..., ::-1]
+            imgs = (imgs * self.img_std) + self.img_mean
+
+            n_imgs, height, width, n_channels = imgs.shape
+            assert (n_imgs % self.temporal_win_size) == 0
+
+            imgs = imgs.reshape(
+                n_imgs // self.temporal_win_size, self.temporal_win_size,
+                height, width, n_channels
+            )  # [B/G,G,H,W,C]
+
+            img_rows = []
+            for imgs_group in imgs:
+                img_cols = np.hstack(imgs_group)
+                img_rows.append(img_cols)
+            img_final = np.vstack(img_rows)
+
+            cv.imshow(self.win_name, img_final)
+            key = cv.waitKey(0) & 0xff
+
+            return key != ord(self.quit_key)
+
+    dataset = make_uadetrac_dataset(cfg)
+    data_loader = make_data_loader(cfg, dataset)
+
+    n_batches_shown = 4
+
+    with ImgBatchVisualizer(cfg, max_size=400) as visualizer:
+        for batch_idx, imgs in enumerate(data_loader, start=1):
+            if batch_idx > n_batches_shown:
+                break
+
+            if not visualizer.show_imgs(imgs):
+                break
