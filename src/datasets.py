@@ -36,7 +36,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms as T
 
 
-class UADetracDetectionDataset(torch.utils.data.Dataset):
+class UADetracContextDetectionDataset(torch.utils.data.Dataset):
     @dataclasses.dataclass(frozen=True)
     class _SeqBoxesIndex:
         seq_idx: int
@@ -68,23 +68,20 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         seq_box_idx = self._global_to_local_seq_img_idxs[idx]
+        seq_idx, img_idx = seq_box_idx.seq_idx, seq_box_idx.img_idx
 
-        img_file_paths = self._seq_img_paths[seq_box_idx.seq_idx]
-        img_boxes = self._seq_boxes[seq_box_idx.seq_idx]
-
+        img_file_paths = self._seq_img_paths[seq_idx]
         abs_idxs = np.clip(
-            self._context_rel_idxs + seq_box_idx.img_idx, 0,
-            len(img_file_paths) - 1
+            self._context_rel_idxs + img_idx, 0, len(img_file_paths) - 1
         )
 
-        imgs, boxes = [], []
-
+        imgs = []
         prev_idx = -1
         img = None
 
         for idx in abs_idxs:
-            img_file_path, curr_boxes = img_file_paths[idx], img_boxes[idx]
-
+            img_file_path = img_file_paths[idx]
+            
             if prev_idx != idx:
                 img = Image.open(img_file_path)
             
@@ -92,13 +89,15 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
                 img = self.transforms(img)
             
             imgs.append(img)
-            boxes.append(curr_boxes)
-
             prev_idx = idx
         
         imgs = torch.stack(imgs)
 
-        return imgs
+        boxes = self._seq_boxes[seq_idx][img_idx]
+        labels = torch.ones((len(boxes),), dtype=torch.int64)
+        target = {'boxes': boxes, 'labels': labels}
+
+        return imgs, target, img_idx
 
     def __len__(self):
         """Returns the length of the dataset. It represents the number of
@@ -158,7 +157,7 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
 
         Returns:
             Tuple[pathlib.Path, pathlib.Path]: Directory paths for images and
-            annotations.
+                annotations.
         """
         assert subset in ('train', 'test')
 
@@ -196,13 +195,22 @@ class UADetracDetectionDataset(torch.utils.data.Dataset):
                 h = float(box_attr['height'])
 
                 box = (x, y, x + w, y + h)
+                box = torch.as_tensor(box, dtype=torch.float32)
                 boxes.append(box)
             
             yield frame_num, boxes
 
 
 def collate_context_imgs_batch(batch):
-    return torch.cat(batch, dim=0)
+    # TODO Collate the batch by iterating all the elements of the list.
+    imgs_groups, targets, center_img_idxs = batch
+    imgs = torch.cat(imgs_groups, dim=0)
+
+    if len(imgs) == len(targets):
+        # imgs = torch.squeeze(imgs)
+        return imgs, targets
+    else:
+        return imgs, targets, center_img_idxs
 
 
 def make_uadetrac_dataset(cfg):
@@ -210,7 +218,7 @@ def make_uadetrac_dataset(cfg):
     normalize = T.Normalize(cfg.DATASET.IMG_MEAN, cfg.DATASET.IMG_STD)
     transforms = T.Compose([to_tensor, normalize])
 
-    dataset = UADetracDetectionDataset(
+    dataset = UADetracContextDetectionDataset(
         cfg.DATASET.ROOT_PATH, cfg.DATASET.SUBSET,
         past_context=cfg.DATASET.PAST_CONTEXT,
         future_context=cfg.DATASET.FUTURE_CONTEXT,
@@ -247,6 +255,8 @@ def _calc_context_rel_idxs(past_context, future_context, context_stride):
 
 
 if __name__ == '__main__':
+    import itertools
+
     import cv2 as cv
     import torch.nn.functional as F
 
@@ -283,8 +293,10 @@ if __name__ == '__main__':
 
             if self.max_size is not None:
                 max_side = max(height, width)
+
                 if max_side > self.max_size:
                     scale = self.max_size / max_side
+
                     imgs_tensor = F.interpolate(
                         imgs_tensor, scale_factor=scale, mode='bicubic',
                         align_corners=True
@@ -320,9 +332,16 @@ if __name__ == '__main__':
     n_batches_shown = 4
 
     with ImgBatchVisualizer(cfg, max_size=400) as visualizer:
-        for batch_idx, imgs in enumerate(data_loader, start=1):
-            if batch_idx > n_batches_shown:
-                break
+        for batch_data in itertools.islice(data_loader, n_batches_shown):
+            imgs = batch_data[0]
+            targets = batch_data[1]
+
+            if len(batch_data) == 3:
+                center_img_idxs = batch_data[-1]
+            else:
+                center_img_idxs = None
+
+            print(f"Targets: {targets} | Img. idxs: {center_img_idxs}")
 
             if not visualizer.show_imgs(imgs):
                 break

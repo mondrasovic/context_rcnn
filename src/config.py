@@ -30,7 +30,7 @@ _C = CN()
 # ------------------------------------------------------------------------------
 _C.DATASET = CN()
 
-_C.DATASET.ROOT_PATH = '../../../datasets/UA-DETRAC'
+_C.DATASET.ROOT_PATH = '../../../../datasets/UA-DETRAC'
 _C.DATASET.SUBSET = 'train'
 
 _C.DATASET.GROUP_HORIZONTAL_FLIP = None
@@ -46,7 +46,7 @@ _C.DATA_LOADER = CN()
 
 _C.DATA_LOADER.BATCH_SIZE = 4
 _C.DATA_LOADER.SHUFFLE = True
-_C.DATA_LOADER.NUM_WORKERS = 2
+_C.DATA_LOADER.NUM_WORKERS = 0
 
 # ------------------------------------------------------------------------------
 _C.MODEL = CN()
