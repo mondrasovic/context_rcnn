@@ -68,36 +68,42 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         seq_box_idx = self._global_to_local_seq_img_idxs[idx]
-        seq_idx, img_idx = seq_box_idx.seq_idx, seq_box_idx.img_idx
+        seq_idx, center_img_idx = seq_box_idx.seq_idx, seq_box_idx.img_idx
 
         img_file_paths = self._seq_img_paths[seq_idx]
-        abs_idxs = np.clip(
-            self._context_rel_idxs + img_idx, 0, len(img_file_paths) - 1
+        abs_context_idxs = np.clip(
+            self._context_rel_idxs + center_img_idx, 0, len(img_file_paths) - 1
         )
 
-        imgs = []
-        prev_idx = -1
-        img = None
-
-        for idx in abs_idxs:
+        def _read_img(idx):
             img_file_path = img_file_paths[idx]
-            
-            if prev_idx != idx:
-                img = Image.open(img_file_path)
-            
+            img = Image.open(img_file_path)
+
             if self.transforms is not None:
                 img = self.transforms(img)
             
-            imgs.append(img)
-            prev_idx = idx
+            return img
         
-        imgs = torch.stack(imgs)
+        center_img = _read_img(center_img_idx)
+        context_imgs = []
+        prev_idx = center_img_idx
 
-        boxes = self._seq_boxes[seq_idx][img_idx]
+        for context_idx in abs_context_idxs:            
+            if prev_idx != context_idx:
+                img = _read_img(context_idx)
+            context_imgs.append(img)
+
+            prev_idx = context_idx
+
+        boxes = self._seq_boxes[seq_idx][center_img_idx]
         labels = torch.ones((len(boxes),), dtype=torch.int64)
-        target = {'boxes': boxes, 'labels': labels}
+        target = {
+            'boxes': boxes,
+            'labels': labels,
+            'context_imgs': context_imgs,
+        }
 
-        return imgs, target, img_idx
+        return center_img, target
 
     def __len__(self):
         """Returns the length of the dataset. It represents the number of
@@ -202,15 +208,13 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
 
 
 def collate_context_imgs_batch(batch):
-    # TODO Collate the batch by iterating all the elements of the list.
-    imgs_groups, targets, center_img_idxs = batch
-    imgs = torch.cat(imgs_groups, dim=0)
+    imgs, targets = [], []
+    
+    for imgs_item, targets_item in batch:
+        imgs.append(imgs_item)    
+        targets.append(targets_item)
 
-    if len(imgs) == len(targets):
-        # imgs = torch.squeeze(imgs)
-        return imgs, targets
-    else:
-        return imgs, targets, center_img_idxs
+    return imgs, targets
 
 
 def make_uadetrac_dataset(cfg):
@@ -230,26 +234,26 @@ def make_uadetrac_dataset(cfg):
     return dataset
 
 
-def make_data_loader(cfg, dataset, collate_fn=collate_context_imgs_batch):
+def make_data_loader(cfg, dataset):
     data_loader = DataLoader(
         dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
         shuffle=cfg.DATA_LOADER.SHUFFLE,
-        num_workers=cfg.DATA_LOADER.NUM_WORKERS, collate_fn=collate_fn
+        num_workers=cfg.DATA_LOADER.NUM_WORKERS,
+        collate_fn=collate_context_imgs_batch
     )
 
     return data_loader
 
 
-def _calc_context_rel_idxs(past_context, future_context, context_stride):
+def _calc_context_rel_idxs(past_context, future_context, stride):
     assert past_context >= 0
     assert future_context >= 0
-    assert context_stride > 0
+    assert stride > 0
 
-    past_idxs = np.arange(-past_context, 0, context_stride)
-    center_idx = np.asarray([0])
-    future_idxs = np.arange(1, future_context + 1, context_stride)
+    past_idxs = np.arange(-past_context, 0, stride)
+    future_idxs = np.arange(1, future_context + 1, stride)
 
-    idxs = np.concatenate((past_idxs, center_idx, future_idxs))
+    idxs = np.concatenate((past_idxs, future_idxs))
     
     return idxs
 
@@ -274,8 +278,11 @@ if __name__ == '__main__':
             self.img_mean = cfg.DATASET.IMG_MEAN
             self.img_std = cfg.DATASET.IMG_STD
 
-            context_size = cfg.DATASET.PAST_CONTEXT + cfg.DATASET.FUTURE_CONTEXT
-            self.temporal_win_size = 1 + context_size
+            self.past_context = cfg.DATASET.PAST_CONTEXT
+            self.temporal_win_size = self._calc_temporal_win_size(
+                self.past_context, cfg.DATASET.FUTURE_CONTEXT,
+                cfg.DATASET.CONTEXT_STRIDE
+            )
 
             self.max_size = max_size
             self.win_name = win_name
@@ -287,8 +294,18 @@ if __name__ == '__main__':
         
         def __exit__(self, exc_type, exc_val, exc_tb):
             cv.destroyWindow(self.win_name)
+        
+        def preview_batch_imgs(self, imgs, targets):
+            imgs_batch = []
+            for img, target in zip(imgs, targets):
+                context_imgs = target['context_imgs']
+                context_imgs.insert(self.past_context, img)
+                imgs_batch.extend(context_imgs)
+            
+            imgs_tensor = torch.stack(imgs_batch)
+            return self._preview_batch_imgs(imgs_tensor)
 
-        def show_imgs(self, imgs_tensor):
+        def _preview_batch_imgs(self, imgs_tensor):
             *_, height, width = imgs_tensor.shape
 
             if self.max_size is not None:
@@ -325,6 +342,13 @@ if __name__ == '__main__':
             key = cv.waitKey(0) & 0xff
 
             return key != ord(self.quit_key)
+        
+        @staticmethod
+        def _calc_temporal_win_size(past_context, future_context, stride):
+            # TODO Implement better, purely arithmetic-based solution.
+            return 1 + len(_calc_context_rel_idxs(
+                past_context, future_context, stride
+            ))
 
     dataset = make_uadetrac_dataset(cfg)
     data_loader = make_data_loader(cfg, dataset)
@@ -332,16 +356,6 @@ if __name__ == '__main__':
     n_batches_shown = 4
 
     with ImgBatchVisualizer(cfg, max_size=400) as visualizer:
-        for batch_data in itertools.islice(data_loader, n_batches_shown):
-            imgs = batch_data[0]
-            targets = batch_data[1]
-
-            if len(batch_data) == 3:
-                center_img_idxs = batch_data[-1]
-            else:
-                center_img_idxs = None
-
-            print(f"Targets: {targets} | Img. idxs: {center_img_idxs}")
-
-            if not visualizer.show_imgs(imgs):
+        for imgs, targets in itertools.islice(data_loader, n_batches_shown):
+            if not visualizer.preview_batch_imgs(imgs, targets):
                 break
