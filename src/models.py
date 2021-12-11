@@ -42,12 +42,42 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.ops import MultiScaleRoIAlign
 
 
+class Flatten(nn.Module):
+    """Flattens each input tensor along the batch dimension."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Flattens the input tensor of shape [B,D1..Dn] into [B,-1].
+
+        Args:
+            x (torch.Tensor): Tensor of shape [B,D1...Dn] to flatten (reshape).
+
+        Returns:
+            torch.Tensor: Flattened tensor of shape [B,-1].
+        """
+        x = x.flatten(start_dim=1)
+        return x
+
+
+class AttentionEmbMapper(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+
+        self.flatten = Flatten()
+
+    def forward(self, x):
+        pass
+
+
 class ContextAttention(nn.Module):
     def __init__(self):
         super().__init__()
+
+        self.fc_query = nn.Linear()
     
-    def forward(self, x):
-        pass
+    def forward(self, input_features, context_features):
+        # [N,S,S,C] and [M,D0]
+        input_features = torch.mean(input_features, dim=(1, 2))  # [N,C]
+
 
 
 # Code adapted from
