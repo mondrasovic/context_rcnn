@@ -27,9 +27,9 @@ import sys
 
 import torch
 
-from config import cfg
-from datasets import make_uadetrac_dataset, make_data_loader
-from models import make_object_detection_model
+from .config import cfg
+from .datasets import make_uadetrac_dataset, make_data_loader
+from .models import make_object_detection_model
 
 
 def parse_args():

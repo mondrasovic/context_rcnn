@@ -33,7 +33,7 @@ _C.DEVICE = 'cuda:0'
 # ------------------------------------------------------------------------------
 _C.DATASET = CN()
 
-_C.DATASET.ROOT_PATH = '../../../../datasets/UA-DETRAC'
+_C.DATASET.ROOT_PATH = '../../datasets/UA-DETRAC'
 _C.DATASET.SUBSET = 'train'
 
 _C.DATASET.PAST_CONTEXT = 0

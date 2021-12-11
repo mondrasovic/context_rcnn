@@ -194,7 +194,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
 
                 img_num_1, img_file_path = files_iter_data
                 img_num_2, boxes = boxes_iter_data
-                assert img_num_1 == img_num_2
+                assert img_num_1 == img_num_2 
 
                 seq_img_file_paths.append(img_file_path)
                 seq_img_boxes.append(boxes)
@@ -240,11 +240,10 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             Tuple[int, str]: Yield tuples containing image (frame) number and
             the corresponding file path.
         """
-        for img_file in seq_dir.iterdir():
-            img_num = int(img_file.stem[-5:])
-            img_file_path = str(img_file)
-
-            yield img_num, img_file_path
+        img_num_path_pairs = [
+            (int(p.stem[-5:]), str(p)) for p in seq_dir.iterdir()
+        ]
+        yield from iter(sorted(img_num_path_pairs))
 
     @staticmethod
     def _iter_seq_boxes(xml_file_path):
