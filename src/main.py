@@ -25,12 +25,16 @@
 import argparse
 import sys
 
-from .config import cfg
+import torch
+
+from config import cfg
+from datasets import make_uadetrac_dataset, make_data_loader
+from models import make_object_detection_model
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="SiamMOT evaluation inference analyzer.",
+        description="Faster RCNN, Context RCNN: training/evaluation script.",
     )
     
     parser.add_argument(
@@ -46,6 +50,22 @@ def parse_args():
     return args
 
 
+def train(device):
+    dataset = make_uadetrac_dataset(cfg)
+    data_loader = make_data_loader(cfg, dataset)
+    model = make_object_detection_model(cfg).to(device)
+
+    model.train()
+    images, targets = next(iter(data_loader))
+    output = model(images, targets)
+
+    model.eval()
+    x = [torch.rand(3, 300, 400).to(device), torch.rand(3, 500, 400).to(device)]
+    predictions = model(x)
+    print(f"Model output: {output}")
+    print(f"Predictions: {predictions}")
+
+
 def main():
     args = parse_args()
 
@@ -54,6 +74,9 @@ def main():
     if args.opts:
         cfg.merge_from_list(args.opts)
     cfg.freeze()
+
+    device = torch.device(cfg.DEVICE)
+    train(device)
 
     return 0
 

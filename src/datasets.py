@@ -23,7 +23,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
 import dataclasses
-import functools
 import itertools
 
 import numpy as np
@@ -119,6 +118,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             self._context_rel_idxs + center_img_idx, 0, len(img_file_paths) - 1
         )
 
+        # TODO Call transformations with both img and target.
         def _read_img(idx):
             img_file_path = img_file_paths[idx]
             img = Image.open(img_file_path)
@@ -140,9 +140,10 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             prev_idx = context_idx
 
         boxes = self._seq_boxes[seq_idx][center_img_idx]
+        boxes_tensor = torch.as_tensor(boxes, dtype=torch.float32)
         labels = torch.ones((len(boxes),), dtype=torch.int64)
         target = {
-            'boxes': boxes,
+            'boxes': boxes_tensor,
             'labels': labels,
             'context_imgs': context_imgs,
         }
@@ -255,8 +256,9 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             xml_file_path (str): Sequence specification XML file path.
 
         Yields:
-            Tuple[int, List[torch.Tensor]]: A tuple containing the frame number
-            and the list of bounding boxes in a tensor xyxy format.
+            Tuple[int, List[Tuple[float, float, float, float]]]: A tuple
+            containing the frame number and the list of bounding boxes in a
+            xyxy format.
         """
         tree = ElementTree.parse(xml_file_path)
         root = tree.getroot()
@@ -274,14 +276,26 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
                 h = float(box_attr['height'])
 
                 box = (x, y, x + w, y + h)
-                box = torch.as_tensor(box, dtype=torch.float32)
                 boxes.append(box)
             
             yield frame_num, boxes
 
 
-def collate_context_imgs_batch(batch):
-    imgs, targets = map(list, zip(*batch))
+def collate_context_imgs_batch_on_device(batch, device=None):
+    if device is None:
+        device = torch.device('cpu')
+    
+    imgs, targets = [], []
+    for img, target in batch:
+        new_target = {}
+        for key, val in target.items():
+            if isinstance(val, torch.Tensor):
+                val = val.to(device)
+            new_target[key] = val
+        
+        imgs.append(img.to(device))
+        targets.append(new_target)
+    
     return imgs, targets
 
 
@@ -315,7 +329,19 @@ def make_uadetrac_dataset(cfg, train=True):
     return dataset
 
 
-def make_data_loader(cfg, dataset, collate_fn=collate_context_imgs_batch):
+def make_batch_collator(cfg):
+    device = torch.device(cfg.DEVICE)
+
+    def _collate_batch(batch):
+        return collate_context_imgs_batch_on_device(batch, device)
+    
+    return _collate_batch
+
+
+def make_data_loader(cfg, dataset, collate_fn=None):
+    if collate_fn is None:
+        collate_fn = make_batch_collator(cfg)
+    
     data_loader = DataLoader(
         dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
         shuffle=cfg.DATA_LOADER.SHUFFLE,
@@ -340,10 +366,9 @@ def _calc_context_rel_idxs(past_context, future_context, stride):
 
 
 if __name__ == '__main__':
-    import itertools
+    import functools
 
     import cv2 as cv
-    import torch.nn.functional as F
 
     from config import cfg
 

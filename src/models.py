@@ -100,19 +100,10 @@ class RoiHeadsWithContext(RoIHeads):
         if targets is not None:
             for t in targets:
                 floating_point_types = (torch.float, torch.double, torch.half)
-                assert (
-                    t['boxes'].dtype in floating_point_types,
-                    "target boxes must of float type"
-                )
-                assert (
-                    t['labels'].dtype == torch.int64,
-                    "target labels must of int64 type"
-                )
+                assert t['boxes'].dtype in floating_point_types, "target boxes must of float type"
+                assert t['labels'].dtype == torch.int64, "target labels must of int64 type"
                 if self.has_keypoint():
-                    assert (
-                        t['keypoints'].dtype == torch.float32,
-                        "target keypoints must of float type"
-                    )
+                    assert t['keypoints'].dtype == torch.float32, "target keypoints must of float type"
 
         if self.training:
             proposals, matched_idxs, labels, regression_targets = (
@@ -522,7 +513,7 @@ def make_faster_rcnn_model(cfg):
 
 
 def make_context_rcnn_model(cfg):
-    pass
+    raise NotImplementedError
 
 
 def make_object_detection_model(cfg):
