@@ -30,6 +30,9 @@ import torch
 from .config import cfg
 from .datasets import make_uadetrac_dataset, make_data_loader
 from .models import make_object_detection_model
+from .optim import make_optimizer, make_lr_scheduler
+from .train import train_one_epoch
+from .eval import evaluate
 
 
 def parse_args():
@@ -53,17 +56,24 @@ def parse_args():
 def train(device):
     dataset = make_uadetrac_dataset(cfg)
     data_loader = make_data_loader(cfg, dataset)
+    data_loader_va = make_data_loader(cfg, dataset)
+
     model = make_object_detection_model(cfg).to(device)
 
-    model.train()
-    images, targets = next(iter(data_loader))
-    output = model(images, targets)
+    optimizer = make_optimizer(cfg, model)
+    lr_scheduler = make_lr_scheduler(cfg, optimizer)
 
-    model.eval()
-    x = [torch.rand(3, 300, 400).to(device), torch.rand(3, 500, 400).to(device)]
-    predictions = model(x)
-    print(f"Model output: {output}")
-    print(f"Predictions: {predictions}")
+    model.train()
+
+    num_epochs = cfg.TRAIN.N_EPOCHS
+    print_freq = cfg.TRAIN.PRINT_FREQ
+
+    for epoch in range(1, num_epochs + 1):
+        train_one_epoch(
+            model, optimizer, data_loader, epoch, print_freq=print_freq
+        )
+        lr_scheduler.step()
+        # evaluate(model, data_loader_va, device=device)
 
 
 def main():

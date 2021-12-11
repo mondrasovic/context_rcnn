@@ -24,13 +24,11 @@
 
 import dataclasses
 import itertools
-
-import numpy as np
-import torch
-
 from pathlib import Path
 from xml.etree import ElementTree
 
+import numpy as np
+import torch
 from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision import transforms as T
@@ -344,7 +342,7 @@ def make_data_loader(cfg, dataset, collate_fn=None):
     data_loader = DataLoader(
         dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
         shuffle=cfg.DATA_LOADER.SHUFFLE,
-        num_workers=cfg.DATA_LOADER.NUM_WORKERS,
+        num_workers=cfg.DATA_LOADER.N_WORKERS,
         collate_fn=collate_fn
     )
 

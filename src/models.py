@@ -496,7 +496,7 @@ class ContextRCNN(GeneralizedRCNN):
 def make_faster_rcnn_model(cfg):
     """Makes a Faster R-CNN model with ResNet-50 FPN backbone pre-trained on
     MS COCO dataset with the classification head replaced with a different
-    number of classes specified using the cfg.MODEL.NUM_CLASSES attribute.
+    number of classes specified using the cfg.MODEL.N_CLASSES attribute.
 
     Args:
         cfg (CfgNode): YACS configuration.
@@ -505,7 +505,7 @@ def make_faster_rcnn_model(cfg):
         nn.Module: Faster R-CNN model.
     """
     model = fasterrcnn_resnet50_fpn(pretrained=True)
-    num_classes = cfg.MODEL.NUM_CLASSES
+    num_classes = cfg.MODEL.N_CLASSES
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
  
