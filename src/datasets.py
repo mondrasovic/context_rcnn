@@ -23,6 +23,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
 import dataclasses
+import functools
 import itertools
 
 import numpy as np
@@ -284,29 +285,42 @@ def collate_context_imgs_batch(batch):
     return imgs, targets
 
 
-def make_uadetrac_dataset(cfg):
-    to_tensor = T.ToTensor()
-    normalize = T.Normalize(cfg.DATASET.IMG_MEAN, cfg.DATASET.IMG_STD)
-    transforms = T.Compose([to_tensor, normalize])
+def make_transforms(cfg, train=True):
+    transforms = [T.ToTensor()]
+    
+    if train:
+        color_jitter = T.ColorJitter(
+            cfg.DATASET.AUG.BRIGHTNESS, cfg.DATASET.AUG.CONTRAST,
+            cfg.DATASET.AUG.SATURATION, cfg.DATASET.AUG.HUE
+        )
+        transforms.append(color_jitter)
+    
+    transforms = T.Compose(transforms)
+
+    return transforms
+
+
+def make_uadetrac_dataset(cfg, train=True):
+    transforms = make_transforms(cfg, train)
 
     dataset = UADetracContextDetectionDataset(
         cfg.DATASET.ROOT_PATH, cfg.DATASET.SUBSET,
         past_context=cfg.DATASET.PAST_CONTEXT,
         future_context=cfg.DATASET.FUTURE_CONTEXT,
         context_stride=cfg.DATASET.CONTEXT_STRIDE,
-        group_horizontal_flip=cfg.DATASET.GROUP_HORIZONTAL_FLIP,
+        group_horizontal_flip=cfg.DATASET.AUG.GROUP_HORIZONTAL_FLIP,
         transforms=transforms
     )
 
     return dataset
 
 
-def make_data_loader(cfg, dataset):
+def make_data_loader(cfg, dataset, collate_fn=collate_context_imgs_batch):
     data_loader = DataLoader(
         dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
         shuffle=cfg.DATA_LOADER.SHUFFLE,
         num_workers=cfg.DATA_LOADER.NUM_WORKERS,
-        collate_fn=collate_context_imgs_batch
+        collate_fn=collate_fn
     )
 
     return data_loader
@@ -333,6 +347,25 @@ if __name__ == '__main__':
 
     from config import cfg
 
+    
+    def tensor_to_cv_img(img_tensor, max_size=None):
+        img = img_tensor.cpu().numpy()  # [C,H,W]
+        img = np.transpose(img, (1, 2, 0))  # [H,W,C]
+        img = img[..., ::-1]
+
+        if max_size is not None:
+            height, width, _ = img.shape
+            max_side = max(height, width)
+            
+            if max_side > max_size:
+                scale = max_size / max_side
+                img = cv.resize(
+                    img, None, fx=scale, fy=scale, interpolation=cv.INTER_CUBIC
+                )
+        
+        return img
+    
+
     class ImgBatchVisualizer:
         def __init__(
             self,
@@ -342,9 +375,6 @@ if __name__ == '__main__':
             win_name='Batch Preview',
             quit_key='q'
         ):
-            self.img_mean = cfg.DATASET.IMG_MEAN
-            self.img_std = cfg.DATASET.IMG_STD
-
             self.past_context = cfg.DATASET.PAST_CONTEXT
             self.temporal_win_size = self._calc_temporal_win_size(
                 self.past_context, cfg.DATASET.FUTURE_CONTEXT,
@@ -363,46 +393,21 @@ if __name__ == '__main__':
             cv.destroyWindow(self.win_name)
         
         def preview_batch_imgs(self, imgs, targets):
-            imgs_batch = []
-            for img, target in zip(imgs, targets):
-                context_imgs = target['context_imgs']
-                context_imgs.insert(self.past_context, img)
-                imgs_batch.extend(context_imgs)
-            
-            imgs_tensor = torch.stack(imgs_batch)
-            return self._preview_batch_imgs(imgs_tensor)
-
-        def _preview_batch_imgs(self, imgs_tensor):
-            *_, height, width = imgs_tensor.shape
-
-            if self.max_size is not None:
-                max_side = max(height, width)
-
-                if max_side > self.max_size:
-                    scale = self.max_size / max_side
-
-                    imgs_tensor = F.interpolate(
-                        imgs_tensor, scale_factor=scale, mode='bicubic',
-                        align_corners=True
-                    )
-            
-            imgs = imgs_tensor.cpu().numpy()  # [B,C,H,W]
-            imgs = np.transpose(imgs, (0, 2, 3, 1))  # [B,H,W,C]
-            imgs = imgs[..., ::-1]
-            imgs = (imgs * self.img_std) + self.img_mean
-
-            n_imgs, height, width, n_channels = imgs.shape
-            assert (n_imgs % self.temporal_win_size) == 0
-
-            imgs = imgs.reshape(
-                n_imgs // self.temporal_win_size, self.temporal_win_size,
-                height, width, n_channels
-            )  # [B/G,G,H,W,C]
-
             img_rows = []
-            for imgs_group in imgs:
-                img_cols = np.hstack(imgs_group)
-                img_rows.append(img_cols)
+
+            _to_cv_img = functools.partial(
+                tensor_to_cv_img, max_size=self.max_size
+            )
+
+            for img_tensor, target in zip(imgs, targets):
+                center_img = _to_cv_img(img_tensor)
+                img_cols = list(map(_to_cv_img, target['context_imgs']))
+                center_img = _to_cv_img(img_tensor)
+                img_cols.insert(self.past_context, center_img)
+
+                img_cols_merged = np.hstack(img_cols)
+                img_rows.append(img_cols_merged)
+            
             img_final = np.vstack(img_rows)
 
             cv.imshow(self.win_name, img_final)
