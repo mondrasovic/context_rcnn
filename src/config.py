@@ -51,6 +51,7 @@ _C.DATA_LOADER.NUM_WORKERS = 0
 # ------------------------------------------------------------------------------
 _C.MODEL = CN()
 
+_C.MODEL.NAME = 'FasterRCNN'  # Either 'FasterRCNN' or 'ContextRCNN'.
 _C.MODEL.NUM_CLASSES = 2  # 0 - background, 1 - vehicle
 
 cfg = _C
