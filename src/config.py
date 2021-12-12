@@ -53,14 +53,16 @@ _C.DATASET.AUG.HUE = 0
 # ------------------------------------------------------------------------------
 _C.DATA_LOADER = CN()
 
-_C.DATA_LOADER.BATCH_SIZE = 4
+_C.DATA_LOADER.BATCH_SIZE = 5
 _C.DATA_LOADER.SHUFFLE = True
 _C.DATA_LOADER.N_WORKERS = 0
 
 # ------------------------------------------------------------------------------
 _C.MODEL = CN()
 
-_C.MODEL.NAME = 'FasterRCNN'  # Either 'FasterRCNN' or 'ContextRCNN'.
+_C.MODEL.NAME = 'ContextRCNN'  # Either 'FasterRCNN' or 'ContextRCNN'.
+_C.MODEL.PRETRAINED_BACKBONE = True
+_C.MODEL.TRAINABLE_BACKBONE_LAYERS = 3
 _C.MODEL.N_CLASSES = 2  # 0 - background, 1 - vehicle
 
 # ------------------------------------------------------------------------------ 
@@ -80,7 +82,7 @@ _C.LR_SCHED.GAMMA = 0.1
 _C.TRAIN = CN()
 
 _C.TRAIN.N_EPOCHS = 10
-_C.TRAIN.PRINT_FREQ = 2
+_C.TRAIN.PRINT_FREQ = 10
 
 # ------------------------------------------------------------------------------ 
 cfg = _C

@@ -22,13 +22,14 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
+import warnings
+from collections import OrderedDict
+from typing import List, Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
-
-from typing import List, Dict
-
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
-from torchvision.models.detection.generalized_rcnn import GeneralizedRCNN
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection.faster_rcnn import (
     FastRCNNPredictor, TwoMLPHead
 )
@@ -277,7 +278,7 @@ class RoiHeadsWithContext(RoIHeads):
 
 # Code adapted from
 # https://github.com/pytorch/vision/blob/main/torchvision/models/detection/faster_rcnn.py
-class ContextRCNN(GeneralizedRCNN):
+class ContextRCNN(nn.Module):
     """
     Implements Context R-CNN.
 
@@ -357,48 +358,6 @@ class ContextRCNN(GeneralizedRCNN):
             of the classification head
         bbox_reg_weights (Tuple[float, float, float, float]): weights for the encoding/decoding of the
             bounding boxes
-
-    Example::
-
-        >>> import torch
-        >>> import torchvision
-        >>> from torchvision.models.detection import FasterRCNN
-        >>> from torchvision.models.detection.rpn import AnchorGenerator
-        >>> # load a pre-trained model for classification and return
-        >>> # only the features
-        >>> backbone = torchvision.models.mobilenet_v2(pretrained=True).features
-        >>> # FasterRCNN needs to know the number of
-        >>> # output channels in a backbone. For mobilenet_v2, it's 1280
-        >>> # so we need to add it here
-        >>> backbone.out_channels = 1280
-        >>>
-        >>> # let's make the RPN generate 5 x 3 anchors per spatial
-        >>> # location, with 5 different sizes and 3 different aspect
-        >>> # ratios. We have a Tuple[Tuple[int]] because each feature
-        >>> # map could potentially have different sizes and
-        >>> # aspect ratios
-        >>> anchor_generator = AnchorGenerator(sizes=((32, 64, 128, 256, 512),),
-        >>>                                    aspect_ratios=((0.5, 1.0, 2.0),))
-        >>>
-        >>> # let's define what are the feature maps that we will
-        >>> # use to perform the region of interest cropping, as well as
-        >>> # the size of the crop after rescaling.
-        >>> # if your backbone returns a Tensor, featmap_names is expected to
-        >>> # be ['0']. More generally, the backbone should return an
-        >>> # OrderedDict[Tensor], and in featmap_names you can choose which
-        >>> # feature maps to use.
-        >>> roi_pooler = torchvision.ops.MultiScaleRoIAlign(featmap_names=['0'],
-        >>>                                                 output_size=7,
-        >>>                                                 sampling_ratio=2)
-        >>>
-        >>> # put the pieces together inside a FasterRCNN model
-        >>> model = FasterRCNN(backbone,
-        >>>                    num_classes=2,
-        >>>                    rpn_anchor_generator=anchor_generator,
-        >>>                    box_roi_pool=roi_pooler)
-        >>> model.eval()
-        >>> x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
-        >>> predictions = model(x)
     """
 
     def __init__(
@@ -440,6 +399,8 @@ class ContextRCNN(GeneralizedRCNN):
         future_context=0,
         context_stride=1,
     ):
+        super().__init__()
+
         if not hasattr(backbone, "out_channels"):
             raise ValueError(
                 "backbone should contain an attribute out_channels "
@@ -449,6 +410,8 @@ class ContextRCNN(GeneralizedRCNN):
 
         assert isinstance(rpn_anchor_generator, (AnchorGenerator, type(None)))
         assert isinstance(box_roi_pool, (MultiScaleRoIAlign, type(None)))
+
+        self.backbone = backbone
 
         if num_classes is not None:
             if box_predictor is not None:
@@ -463,7 +426,7 @@ class ContextRCNN(GeneralizedRCNN):
                     "not specified"
                 )
 
-        out_channels = backbone.out_channels
+        out_channels = self.backbone.out_channels
 
         if rpn_anchor_generator is None:
             anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
@@ -481,7 +444,7 @@ class ContextRCNN(GeneralizedRCNN):
             training=rpn_post_nms_top_n_train, testing=rpn_post_nms_top_n_test
         )
 
-        rpn = RegionProposalNetwork(
+        self.rpn = RegionProposalNetwork(
             rpn_anchor_generator, rpn_head, rpn_fg_iou_thresh,
             rpn_bg_iou_thresh, rpn_batch_size_per_image, rpn_positive_fraction,
             rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh,
@@ -505,22 +468,113 @@ class ContextRCNN(GeneralizedRCNN):
             representation_size = 1024
             box_predictor = FastRCNNPredictor(representation_size, num_classes)
         
-        roi_heads = RoiHeadsWithContext(
+        self.roi_heads = RoiHeadsWithContext(
             box_roi_pool, box_head, box_predictor, box_fg_iou_thresh,
             box_bg_iou_thresh, box_batch_size_per_image, box_positive_fraction,
             bbox_reg_weights, box_score_thresh, box_nms_thresh,
-            box_detections_per_img, past_context, future_context, context_stride
+            box_detections_per_img, past_context=past_context,
+            future_context=future_context, context_stride=context_stride
         )
 
         if image_mean is None:
             image_mean = [0.485, 0.456, 0.406]
         if image_std is None:
             image_std = [0.229, 0.224, 0.225]
-        transform = GeneralizedRCNNTransform(
+        
+        self.transform = GeneralizedRCNNTransform(
             min_size, max_size, image_mean, image_std
         )
 
-        super().__init__(backbone, rpn, roi_heads, transform)
+        self._has_warned = False
+
+    def forward(self, images, targets=None):
+        """
+        Args:
+            images (list[Tensor]): images to be processed
+            targets (list[Dict[str, Tensor]]): ground-truth boxes present in the
+                image (optional)
+
+        Returns:
+            result (list[BoxList] or dict[Tensor]): the output from the model.
+                During training, it returns a dict[Tensor] which contains the
+                losses. During testing, it returns list[BoxList] contains
+                additional fields like `scores`, `labels` and `mask`
+                (for Mask R-CNN models).
+        """
+        if self.training:
+            if targets is None:
+                raise ValueError("In training mode, targets should be passed")
+            
+            for target in targets:
+                boxes = target["boxes"]
+                if isinstance(boxes, torch.Tensor):
+                    if len(boxes.shape) != 2 or boxes.shape[-1] != 4:
+                        raise ValueError(
+                            "Expected target boxes to be a "
+                            f"tensor of shape [N, 4], got {boxes.shape}."
+                        )
+                else:
+                    raise ValueError(
+                        "Expected target boxes to be of "
+                        f"type Tensor, got {type(boxes)}."
+                    )
+
+        original_image_sizes: List[Tuple[int, int]] = []
+        for img in images:
+            val = img.shape[-2:]
+            assert len(val) == 2
+            original_image_sizes.append((val[0], val[1]))
+
+        images, targets = self.transform(images, targets)
+        
+        if targets is not None:
+            for target_idx, target in enumerate(targets):
+                boxes = target['boxes']
+                degenerate_boxes = boxes[:, 2:] <= boxes[:, :2]
+                if degenerate_boxes.any():
+                    # Print the first degenerate box.
+                    bb_idx = torch.where(degenerate_boxes.any(dim=1))[0][0]
+                    degen_bb: List[float] = boxes[bb_idx].tolist()
+                    raise ValueError(
+                        "All bounding boxes should have positive height and "
+                        f"width. Found invalid box {degen_bb} for target at "
+                        f"index {target_idx}."
+                    )
+        # TODO Compute context features by extracting proposal features for the
+        # context as well as the central image.
+        features = self.backbone(images.tensors)
+        if isinstance(features, torch.Tensor):
+            features = OrderedDict([('0', features)])
+        proposals, proposal_losses = self.rpn(images, features, targets)
+        detections, detector_losses = self.roi_heads(
+            features, proposals, images.image_sizes, targets
+        )
+        detections = self.transform.postprocess(
+            detections, images.image_sizes, original_image_sizes
+        )
+
+        losses = {}
+        losses.update(detector_losses)
+        losses.update(proposal_losses)
+
+        if torch.jit.is_scripting():
+            if not self._has_warned:
+                warnings.warn(
+                    "RCNN always returns a (Losses, Detections) tuple in "
+                    "scripting"
+                )
+                self._has_warned = True
+            return losses, detections
+        else:
+            return self.eager_outputs(losses, detections)
+    
+    @torch.jit.unused
+    def eager_outputs(self, losses, detections):
+        if self.training:
+            return losses
+
+        return detections
+
 
 
 def make_faster_rcnn_model(cfg):
@@ -543,7 +597,20 @@ def make_faster_rcnn_model(cfg):
 
 
 def make_context_rcnn_model(cfg):
-    raise NotImplementedError
+    pretrained_backbone = cfg.MODEL.PRETRAINED_BACKBONE
+    trainable_backbone_layers = cfg.MODEL.TRAINABLE_BACKBONE_LAYERS
+    
+    trainable_backbone_layers = _validate_trainable_layers(
+        pretrained_backbone, trainable_backbone_layers, 5, 3
+    )
+    backbone = resnet_fpn_backbone(
+        'resnet50', pretrained_backbone,
+        trainable_layers=trainable_backbone_layers
+    )
+
+    model = ContextRCNN(backbone, cfg.MODEL.N_CLASSES)
+
+    return model
 
 
 def make_object_detection_model(cfg):
@@ -555,3 +622,28 @@ def make_object_detection_model(cfg):
         return make_context_rcnn_model(cfg)
     else:
         raise ValueError("unrecognized model name: " + model_name)
+
+
+def _validate_trainable_layers(
+    pretrained: bool,
+    trainable_backbone_layers: Optional[int],
+    max_value: int,
+    default_value: int,
+) -> int:
+    # Don't freeze any layers if pretrained model or backbone is not used.
+    if not pretrained:
+        if trainable_backbone_layers is not None:
+            warnings.warn(
+                "Changing trainable_backbone_layers has not effect if "
+                "neither pretrained nor pretrained_backbone have been set to "
+                f"True, falling back to trainable_backbone_layers={max_value} "
+                "so that all layers are trainable"
+            )
+        trainable_backbone_layers = max_value
+
+    # By default freeze first blocks.
+    if trainable_backbone_layers is None:
+        trainable_backbone_layers = default_value
+    assert 0 <= trainable_backbone_layers <= max_value
+
+    return trainable_backbone_layers
