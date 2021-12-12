@@ -66,11 +66,18 @@ _C.MODEL.TRAINABLE_BACKBONE_LAYERS = 3
 _C.MODEL.N_CLASSES = 2  # 0 - background, 1 - vehicle
 
 # ------------------------------------------------------------------------------ 
+_C.MODEL.ATTENTION = CN()
+
+_C.MODEL.ATTENTION.QUERY_KEY_DIM = 256
+_C.MODEL.ATTENTION.VALUE_DIM = 256
+_C.MODEL.ATTENTION.SOFTMAX_TEMP = 0.01  # Softmax temperature.
+
+# ------------------------------------------------------------------------------ 
 _C.OPTIM = CN()
 
-_C.OPTIM.BASE_LR = 0.005
+_C.OPTIM.BASE_LR = 0.003
 _C.OPTIM.MOMENTUM = 0.9
-_C.OPTIM.WEIGHT_DECAY = 0.0005
+_C.OPTIM.WEIGHT_DECAY = 0.00005
 
 # ------------------------------------------------------------------------------ 
 _C.LR_SCHED = CN()

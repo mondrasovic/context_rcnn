@@ -28,6 +28,7 @@ from typing import List, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection.faster_rcnn import (
@@ -43,42 +44,103 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.ops import MultiScaleRoIAlign
 
 
-class Flatten(nn.Module):
-    """Flattens each input tensor along the batch dimension."""
+class AttentionEmbMapper(nn.Module):
+    def __init__(self, in_dim: int, out_dim: int) -> None:
+        super().__init__()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Flattens the input tensor of shape [B,D1..Dn] into [B,-1].
+        n_hidden_size = out_dim * 2
+
+        self.fc1: nn.Module = nn.Linear(in_dim, n_hidden_size, bias=False)
+        self.relu2: nn.Module = nn.ReLU(inplace=True)
+        self.fc3 = nn.Module = nn.Linear(n_hidden_size, out_dim, bias=False)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        """Computes attention embedding. It maps input or context features into
+        an intermediate embedding space that will be used as part of the
+        attention mechanism.
 
         Args:
-            x (torch.Tensor): Tensor of shape [B,D1...Dn] to flatten (reshape).
+            features (torch.Tensor): Feature tensor of shape [N,C], where C is
+                the input dimension (no. of channels) specified in the
+                constructor.
 
         Returns:
-            torch.Tensor: Flattened tensor of shape [B,-1].
+            torch.Tensor: Feature embeddings of shape [N,E], where E is the
+                output (embedding) dimension specified in the constructor.
         """
-        x = x.flatten(start_dim=1)
+        x = features
+        x = self.fc1(x)  # [N,H], where H is the hidden layer size.
+        x = self.relu2(x)  # [N,H]
+        x = self.fc3(x)  # [N,E]
+
         return x
 
 
-class AttentionEmbMapper(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super().__init__()
-
-        self.flatten = Flatten()
-
-    def forward(self, x):
-        pass
-
-
 class ContextAttention(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        n_feature_channels: int,
+        query_key_dim: int = 256,
+        value_dim: int = 256,
+        softmax_temperature: float = 0.01,
+    ) -> None:
         super().__init__()
 
-        self.fc_query = nn.Linear()
-    
-    def forward(self, input_features, context_features):
-        # [N,S,S,C] and [M,D0]
-        input_features = torch.mean(input_features, dim=(1, 2))  # [N,C]
+        self.query_mapper: nn.Module = AttentionEmbMapper(
+            n_feature_channels, query_key_dim
+        )
+        self.key_mapper: nn.Module = AttentionEmbMapper(
+            n_feature_channels, query_key_dim
+        )
+        self.value_mapper: nn.Module = AttentionEmbMapper(
+            n_feature_channels, value_dim
+        )
+        self.final_mapper: nn.Module = AttentionEmbMapper(
+            value_dim, n_feature_channels
+        )
 
+        self.softmax_scale: float = (
+            softmax_temperature * (n_feature_channels ** 0.5)
+        )
+    
+    def forward(
+        self,
+        central_features: torch.Tensor,
+        context_features: torch.Tensor
+    ) -> torch.Tensor:
+        """Computes attention bias for the given input and context features.
+
+        Args:
+            central_features (torch.Tensor): Central frame features of shape
+                [B*N,C,S,S], where N is the no. of proposals per image, B is the
+                batch size (no. of images).
+            context_features (torch.Tensor): Context frames features of shape
+                [B*T,C,S,S], where T is the temporal window size (1 + no. of
+                images in the past and future), and B is the batch size
+                (no. of images).
+
+        Returns:
+            torch.Tensor: Attention feature bias of shape [B*N,C].
+        """
+        # Apply global average pooling (GAP).
+        central_features = torch.mean(central_features, dim=(2, 3))  # [B*N,C]
+        context_features = torch.mean(context_features, dim=(2, 3))  # [B*T,C]
+
+        queries = self.query_mapper(central_features)  # [B*N,D1]
+        keys = self.key_mapper(context_features)   # [B*T,D1]
+        values = self.value_mapper(context_features)  # [B*T,D2]
+
+        queries = F.normalize(queries, dim=1)  # [B*N,D1]
+        keys = F.normalize(keys, dim=1)  # [B*T,D1]
+
+        weights = torch.matmul(queries, keys.T)  # [B*N,B*T]
+        weights = F.softmax(weights * self.softmax_scale, dim=1)  # [B*N,B*T]
+
+        values_weighted = torch.matmul(weights, values)  # [B*N,D2]
+
+        attention_biases = self.final_mapper(values_weighted)  # [B*N,C]
+
+        return attention_biases
 
 
 # Code adapted from
