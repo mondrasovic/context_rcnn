@@ -22,8 +22,10 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
+import itertools
 import warnings
 from collections import OrderedDict
+from contextlib import contextmanager
 from typing import List, Dict, Optional, Tuple
 
 import torch
@@ -80,6 +82,7 @@ class ContextAttention(nn.Module):
     def __init__(
         self,
         n_feature_channels: int,
+        *,
         query_key_dim: int = 256,
         value_dim: int = 256,
         softmax_temperature: float = 0.01,
@@ -100,7 +103,7 @@ class ContextAttention(nn.Module):
         )
 
         self.softmax_scale: float = (
-            softmax_temperature * (n_feature_channels ** 0.5)
+            1.0 / (softmax_temperature * (n_feature_channels ** 0.5))
         )
     
     def forward(
@@ -112,33 +115,34 @@ class ContextAttention(nn.Module):
 
         Args:
             central_features (torch.Tensor): Central frame features of shape
-                [B*N,C,S,S], where N is the no. of proposals per image, B is the
-                batch size (no. of images).
+                [N,C,S,S], where N is the no. of proposals per image, N is the
+                batch size (no. of images) multiplied by the no. of proposals
+                per image.
             context_features (torch.Tensor): Context frames features of shape
-                [B*T,C,S,S], where T is the temporal window size (1 + no. of
-                images in the past and future), and B is the batch size
+                [T,C,S,S], where T is the temporal window size (1 + no. of
+                images in the past and future) multiplied by the batch size
                 (no. of images).
 
         Returns:
-            torch.Tensor: Attention feature bias of shape [B*N,C].
+            torch.Tensor: Attention feature bias of shape [N,C].
         """
         # Apply global average pooling (GAP).
-        central_features = torch.mean(central_features, dim=(2, 3))  # [B*N,C]
-        context_features = torch.mean(context_features, dim=(2, 3))  # [B*T,C]
+        central_features = torch.mean(central_features, dim=(2, 3))  # [N,C]
+        context_features = torch.mean(context_features, dim=(2, 3))  # [T,C]
 
-        queries = self.query_mapper(central_features)  # [B*N,D1]
-        keys = self.key_mapper(context_features)   # [B*T,D1]
-        values = self.value_mapper(context_features)  # [B*T,D2]
+        queries = self.query_mapper(central_features)  # [N,D1]
+        keys = self.key_mapper(context_features)   # [T,D1]
+        values = self.value_mapper(context_features)  # [T,D2]
 
-        queries = F.normalize(queries, dim=1)  # [B*N,D1]
-        keys = F.normalize(keys, dim=1)  # [B*T,D1]
+        queries = F.normalize(queries, dim=1)  # [N,D1]
+        keys = F.normalize(keys, dim=1)  # [T,D1]
 
-        weights = torch.matmul(queries, keys.T)  # [B*N,B*T]
-        weights = F.softmax(weights * self.softmax_scale, dim=1)  # [B*N,B*T]
+        weights = torch.matmul(queries, keys.T)  # [N,T]
+        weights = F.softmax(weights * self.softmax_scale, dim=1)  # [N,T]
 
-        values_weighted = torch.matmul(weights, values)  # [B*N,D2]
+        values_weighted = torch.matmul(weights, values)  # [N,D2]
 
-        attention_biases = self.final_mapper(values_weighted)  # [B*N,C]
+        attention_biases = self.final_mapper(values_weighted)  # [N,C]
 
         return attention_biases
 
@@ -161,6 +165,11 @@ class RoiHeadsWithContext(RoIHeads):
         score_thresh,
         nms_thresh,
         detections_per_img,
+        # Context
+        n_feature_channels,
+        query_key_dim=None,
+        value_dim=None,
+        softmax_temperature=0.01,
         # Mask
         mask_roi_pool=None,
         mask_head=None,
@@ -168,10 +177,7 @@ class RoiHeadsWithContext(RoIHeads):
         keypoint_roi_pool=None,
         keypoint_head=None,
         keypoint_predictor=None,
-        # Context
-        past_context=0,
-        future_context=0,
-        context_stride=1):
+    ):
         super().__init__(
             box_roi_pool, box_head, box_predictor, fg_iou_thresh, bg_iou_thresh,
             batch_size_per_image, positive_fraction, bbox_reg_weights,
@@ -180,9 +186,27 @@ class RoiHeadsWithContext(RoIHeads):
             keypoint_predictor
         )
 
-        self.st_attention = None
+        if query_key_dim is None:
+            query_key_dim = n_feature_channels
+        
+        if value_dim is None:
+            value_dim = n_feature_channels
+        
+        self.st_attention = ContextAttention(
+            n_feature_channels, query_key_dim=query_key_dim,
+            value_dim=value_dim, softmax_temperature=softmax_temperature
+        )
 
-    def forward(self, features, proposals, image_shapes, targets=None):
+    def forward(
+        self,
+        features,
+        proposals,
+        image_shapes,
+        context_features,
+        context_proposals,
+        context_image_shapes,
+        targets=None,
+    ):
         """
         Args:
             features (List[Tensor])
@@ -208,7 +232,13 @@ class RoiHeadsWithContext(RoIHeads):
             matched_idxs = None
 
         box_features = self.box_roi_pool(features, proposals, image_shapes)
-        # TODO Add attention computation for the box features.
+        context_box_features = self.box_roi_pool(
+            context_features, context_proposals, context_image_shapes
+        )
+
+        attention_bias = self.st_attention(box_features, context_box_features)
+        box_features += attention_bias[..., None, None]
+        
         box_features = self.box_head(box_features)
         class_logits, box_regression = self.box_predictor(box_features)
 
@@ -426,12 +456,12 @@ class ContextRCNN(nn.Module):
         self,
         backbone,
         num_classes=None,
-        # transform parameters
+        # transform parameters.
         min_size=800,
         max_size=1333,
         image_mean=None,
         image_std=None,
-        # RPN parameters
+        # RPN parameters.
         rpn_anchor_generator=None,
         rpn_head=None,
         rpn_pre_nms_top_n_train=2000,
@@ -444,7 +474,7 @@ class ContextRCNN(nn.Module):
         rpn_batch_size_per_image=256,
         rpn_positive_fraction=0.5,
         rpn_score_thresh=0.0,
-        # Box parameters
+        # Box parameters.
         box_roi_pool=None,
         box_head=None,
         box_predictor=None,
@@ -458,8 +488,9 @@ class ContextRCNN(nn.Module):
         bbox_reg_weights=None,
         # Context parameters
         past_context=0,
-        future_context=0,
-        context_stride=1,
+        query_key_dim=None,
+        value_dim=None,
+        softmax_temperature=0.01,
     ):
         super().__init__()
 
@@ -534,9 +565,11 @@ class ContextRCNN(nn.Module):
             box_roi_pool, box_head, box_predictor, box_fg_iou_thresh,
             box_bg_iou_thresh, box_batch_size_per_image, box_positive_fraction,
             bbox_reg_weights, box_score_thresh, box_nms_thresh,
-            box_detections_per_img, past_context=past_context,
-            future_context=future_context, context_stride=context_stride
+            box_detections_per_img, n_feature_channels=out_channels,
+            query_key_dim=query_key_dim, value_dim=value_dim,
+            softmax_temperature=softmax_temperature
         )
+        self.past_context = past_context
 
         if image_mean is None:
             image_mean = [0.485, 0.456, 0.406]
@@ -586,9 +619,14 @@ class ContextRCNN(nn.Module):
             val = img.shape[-2:]
             assert len(val) == 2
             original_image_sizes.append((val[0], val[1]))
+        
+        context_images = self._join_center_and_context_images(
+            images, targets
+        )
 
         images, targets = self.transform(images, targets)
-        
+        context_images, _ = self.transform(context_images)
+
         if targets is not None:
             for target_idx, target in enumerate(targets):
                 boxes = target['boxes']
@@ -602,14 +640,22 @@ class ContextRCNN(nn.Module):
                         f"width. Found invalid box {degen_bb} for target at "
                         f"index {target_idx}."
                     )
-        # TODO Compute context features by extracting proposal features for the
-        # context as well as the central image.
+        
         features = self.backbone(images.tensors)
         if isinstance(features, torch.Tensor):
             features = OrderedDict([('0', features)])
+        
+        context_features = self.backbone(context_images.tensors)
+        if isinstance(context_features, torch.Tensor):
+            context_features = OrderedDict([('0', context_features)])
+        
         proposals, proposal_losses = self.rpn(images, features, targets)
+        with _evaluating(self.rpn):
+            context_proposals, _ = self.rpn(context_images, context_features)
+
         detections, detector_losses = self.roi_heads(
-            features, proposals, images.image_sizes, targets
+            features, proposals, images.image_sizes, context_features,
+            context_proposals, context_images.image_sizes, targets
         )
         detections = self.transform.postprocess(
             detections, images.image_sizes, original_image_sizes
@@ -636,7 +682,21 @@ class ContextRCNN(nn.Module):
             return losses
 
         return detections
+    
+    def _join_center_and_context_images(self, images, targets):
+        all_images = []
+        center_pos = self.past_context
 
+        for center_image, target in zip(images, targets):
+            context_images = target['context_images']
+            
+            all_images.extend(itertools.chain(
+                context_images[:center_pos],
+                [center_image],
+                context_images[center_pos:])
+            )
+        
+        return all_images
 
 
 def make_faster_rcnn_model(cfg):
@@ -650,7 +710,10 @@ def make_faster_rcnn_model(cfg):
     Returns:
         nn.Module: Faster R-CNN model.
     """
-    model = fasterrcnn_resnet50_fpn(pretrained=True)
+    model = fasterrcnn_resnet50_fpn(
+        pretrained_backbone=cfg.MODEL.PRETRAINED_BACKBONE,
+        trainable_backbone_layers=cfg.MODEL.TRAINABLE_BACKBONE_LAYERS
+    )
     num_classes = cfg.MODEL.N_CLASSES
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
@@ -659,6 +722,14 @@ def make_faster_rcnn_model(cfg):
 
 
 def make_context_rcnn_model(cfg):
+    """[summary]
+
+    Args:
+        cfg (CfgNode): YACS configuration.
+
+    Returns:
+        nn.Module: Context R-CNN model.
+    """
     pretrained_backbone = cfg.MODEL.PRETRAINED_BACKBONE
     trainable_backbone_layers = cfg.MODEL.TRAINABLE_BACKBONE_LAYERS
     
@@ -666,11 +737,17 @@ def make_context_rcnn_model(cfg):
         pretrained_backbone, trainable_backbone_layers, 5, 3
     )
     backbone = resnet_fpn_backbone(
-        'resnet50', pretrained_backbone,
+        'resnet34', pretrained_backbone,
         trainable_layers=trainable_backbone_layers
     )
 
-    model = ContextRCNN(backbone, cfg.MODEL.N_CLASSES)
+    model = ContextRCNN(
+        backbone, cfg.MODEL.N_CLASSES, min_size=540, max_size=960,
+        past_context=cfg.DATASET.PAST_CONTEXT,
+        query_key_dim=cfg.MODEL.ATTENTION.QUERY_KEY_DIM,
+        value_dim=cfg.MODEL.ATTENTION.VALUE_DIM,
+        softmax_temperature=cfg.MODEL.ATTENTION.SOFTMAX_TEMP
+    )
 
     return model
 
@@ -709,3 +786,22 @@ def _validate_trainable_layers(
     assert 0 <= trainable_backbone_layers <= max_value
 
     return trainable_backbone_layers
+
+
+@contextmanager
+def _evaluating(model: nn.Module):
+    """Temporarily switch to evaluation mode.
+
+    Args:
+        model (nn.Module): Model to modify the state of.
+
+    Yields:
+        nn.Module: The provided model.
+    """
+    is_train = model.training
+    try:
+        model.eval()
+        yield model
+    finally:
+        if is_train:
+            model.train()

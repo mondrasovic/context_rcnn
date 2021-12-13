@@ -117,7 +117,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         )
 
         # TODO Call transformations with both img and target.
-        def _read_img(idx):
+        def _read_image(idx):
             img_file_path = img_file_paths[idx]
             img = Image.open(img_file_path)
 
@@ -126,14 +126,15 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             
             return img
         
-        center_img = _read_img(center_img_idx)
-        context_imgs = []
+        center_img = _read_image(center_img_idx)
+        context_images = []
         prev_idx = center_img_idx
+        image = center_img
 
         for context_idx in abs_context_idxs:            
             if prev_idx != context_idx:
-                img = _read_img(context_idx)
-            context_imgs.append(img)
+                image = _read_image(context_idx)
+            context_images.append(image)
 
             prev_idx = context_idx
 
@@ -143,7 +144,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         target = {
             'boxes': boxes_tensor,
             'labels': labels,
-            'context_imgs': context_imgs,
+            'context_images': context_images,
         }
 
         return center_img, target
@@ -278,7 +279,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             yield frame_num, boxes
 
 
-def collate_context_imgs_batch_on_device(batch, device=None):
+def collate_context_images_batch_on_device(batch, device=None):
     if device is None:
         device = torch.device('cpu')
     
@@ -287,8 +288,17 @@ def collate_context_imgs_batch_on_device(batch, device=None):
         new_target = {}
         for key, val in target.items():
             if isinstance(val, torch.Tensor):
-                val = val.to(device)
-            new_target[key] = val
+                new_val = val.to(device)
+            elif isinstance(val, (list, tuple)):
+                new_val = []
+                for item in val:
+                    if isinstance(item, torch.Tensor):
+                        item = item.to(device)
+                    new_val.append(item)
+            else:
+                new_val = val
+
+            new_target[key] = new_val
         
         imgs.append(img.to(device))
         targets.append(new_target)
@@ -330,7 +340,7 @@ def make_batch_collator(cfg):
     device = torch.device(cfg.DEVICE)
 
     def _collate_batch(batch):
-        return collate_context_imgs_batch_on_device(batch, device)
+        return collate_context_images_batch_on_device(batch, device)
     
     return _collate_batch
 
@@ -423,7 +433,7 @@ if __name__ == '__main__':
 
             for img_tensor, target in zip(imgs, targets):
                 center_img = _to_cv_img(img_tensor)
-                img_cols = list(map(_to_cv_img, target['context_imgs']))
+                img_cols = list(map(_to_cv_img, target['context_images']))
                 center_img = _to_cv_img(img_tensor)
                 img_cols.insert(self.past_context, center_img)
 

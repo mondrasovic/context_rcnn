@@ -36,9 +36,9 @@ _C.DATASET = CN()
 _C.DATASET.ROOT_PATH = '../../datasets/UA-DETRAC'
 _C.DATASET.SUBSET = 'train'
 
-_C.DATASET.PAST_CONTEXT = 0
-_C.DATASET.FUTURE_CONTEXT = 0
-_C.DATASET.CONTEXT_STRIDE = 1
+_C.DATASET.PAST_CONTEXT = 4
+_C.DATASET.FUTURE_CONTEXT = 4
+_C.DATASET.CONTEXT_STRIDE = 2
 
 # ------------------------------------------------------------------------------ 
 _C.DATASET.AUG = CN()
@@ -53,9 +53,9 @@ _C.DATASET.AUG.HUE = 0
 # ------------------------------------------------------------------------------
 _C.DATA_LOADER = CN()
 
-_C.DATA_LOADER.BATCH_SIZE = 5
+_C.DATA_LOADER.BATCH_SIZE = 2
 _C.DATA_LOADER.SHUFFLE = True
-_C.DATA_LOADER.N_WORKERS = 0
+_C.DATA_LOADER.N_WORKERS = 3
 
 # ------------------------------------------------------------------------------
 _C.MODEL = CN()
@@ -75,7 +75,7 @@ _C.MODEL.ATTENTION.SOFTMAX_TEMP = 0.01  # Softmax temperature.
 # ------------------------------------------------------------------------------ 
 _C.OPTIM = CN()
 
-_C.OPTIM.BASE_LR = 0.003
+_C.OPTIM.BASE_LR = 0.0003
 _C.OPTIM.MOMENTUM = 0.9
 _C.OPTIM.WEIGHT_DECAY = 0.00005
 
@@ -89,7 +89,7 @@ _C.LR_SCHED.GAMMA = 0.1
 _C.TRAIN = CN()
 
 _C.TRAIN.N_EPOCHS = 10
-_C.TRAIN.PRINT_FREQ = 10
+_C.TRAIN.PRINT_FREQ = 5
 
 # ------------------------------------------------------------------------------ 
 cfg = _C
