@@ -92,5 +92,5 @@ def _to_device(val, device):
     elif isinstance(val, list):
         for i in range(len(val)):
             elem = val[i]
-            val[i] = _to_device(elem)
+            val[i] = _to_device(elem, device)
     return val
