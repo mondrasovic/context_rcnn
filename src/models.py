@@ -487,7 +487,6 @@ class ContextRCNN(nn.Module):
         box_positive_fraction=0.25,
         bbox_reg_weights=None,
         # Context parameters
-        past_context=0,
         query_key_dim=None,
         value_dim=None,
         softmax_temperature=0.01,
@@ -569,7 +568,6 @@ class ContextRCNN(nn.Module):
             query_key_dim=query_key_dim, value_dim=value_dim,
             softmax_temperature=softmax_temperature
         )
-        self.past_context = past_context
 
         if image_mean is None:
             image_mean = [0.485, 0.456, 0.406]
@@ -620,9 +618,7 @@ class ContextRCNN(nn.Module):
             assert len(val) == 2
             original_image_sizes.append((val[0], val[1]))
         
-        context_images = self._join_center_and_context_images(
-            images, targets
-        )
+        context_images = self._join_context_images(targets)
 
         images, targets = self.transform(images, targets)
         context_images, _ = self.transform(context_images)
@@ -650,7 +646,7 @@ class ContextRCNN(nn.Module):
             context_features = OrderedDict([('0', context_features)])
         
         proposals, proposal_losses = self.rpn(images, features, targets)
-        with _evaluating(self.rpn):
+        with _evaluating(self.rpn):  # Avoid computing RPN loss.
             context_proposals, _ = self.rpn(context_images, context_features)
 
         detections, detector_losses = self.roi_heads(
@@ -683,20 +679,13 @@ class ContextRCNN(nn.Module):
 
         return detections
     
-    def _join_center_and_context_images(self, images, targets):
-        all_images = []
-        center_pos = self.past_context
-
-        for center_image, target in zip(images, targets):
-            context_images = target['context_images']
-            
-            all_images.extend(itertools.chain(
-                context_images[:center_pos],
-                [center_image],
-                context_images[center_pos:])
+    def _join_context_images(self, targets):
+        context_images = list(
+            itertools.chain.from_iterable(
+                target['context_images'] for target in targets
             )
-        
-        return all_images
+        )
+        return context_images
 
 
 def make_faster_rcnn_model(cfg):
@@ -737,13 +726,12 @@ def make_context_rcnn_model(cfg):
         pretrained_backbone, trainable_backbone_layers, 5, 3
     )
     backbone = resnet_fpn_backbone(
-        'resnet34', pretrained_backbone,
+        'resnet50', pretrained_backbone,
         trainable_layers=trainable_backbone_layers
     )
 
     model = ContextRCNN(
         backbone, cfg.MODEL.N_CLASSES, min_size=540, max_size=960,
-        past_context=cfg.DATASET.PAST_CONTEXT,
         query_key_dim=cfg.MODEL.ATTENTION.QUERY_KEY_DIM,
         value_dim=cfg.MODEL.ATTENTION.VALUE_DIM,
         softmax_temperature=cfg.MODEL.ATTENTION.SOFTMAX_TEMP
