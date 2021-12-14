@@ -55,7 +55,7 @@ _C.DATA_LOADER = CN()
 
 _C.DATA_LOADER.BATCH_SIZE = 2
 _C.DATA_LOADER.SHUFFLE = True
-_C.DATA_LOADER.N_WORKERS = 3
+_C.DATA_LOADER.N_WORKERS = 4
 
 # ------------------------------------------------------------------------------
 _C.MODEL = CN()
@@ -90,7 +90,7 @@ _C.TRAIN = CN()
 
 _C.TRAIN.N_EPOCHS = 10
 _C.TRAIN.CHECKPOINT_SAVE_FREQ = 1
-_C.TRAIN.PRINT_FREQ = 5
+_C.TRAIN.PRINT_FREQ = 10
 
 # ------------------------------------------------------------------------------ 
 cfg = _C

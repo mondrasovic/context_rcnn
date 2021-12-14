@@ -52,7 +52,7 @@ def do_train(
     
     for epoch in range(start_epoch, n_epochs + 1):
         _train_one_epoch(
-            model, optimizer, data_loader, device, epoch, print_freq=print_freq
+            model, optimizer, data_loader, device, epoch, n_epochs, print_freq
         )
         lr_scheduler.step()
 
@@ -69,6 +69,7 @@ def _train_one_epoch(
     data_loader,
     device,
     epoch,
+    n_epochs,
     print_freq,
     scaler=None
 ):
@@ -78,7 +79,7 @@ def _train_one_epoch(
     metric_logger.add_meter(
         'lr', SmoothedValue(window_size=1, fmt='{value:.6f}')
     )
-    header = f"Epoch: [{epoch}]"
+    header = f"Epoch: [{epoch}/{n_epochs}]"
 
     for images, targets in metric_logger.log_every(
         data_loader, print_freq, header
