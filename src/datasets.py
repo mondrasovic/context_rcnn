@@ -47,7 +47,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         that sequence.
         """
         seq_idx: int
-        img_idx: int
+        image_idx: int
     
     def __init__(
         self,
@@ -85,8 +85,8 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             past_context, future_context, context_stride
         )
 
-        self._global_to_local_seq_img_idxs = []
-        self._seq_img_paths = []
+        self._global_to_local_seq_image_idxs = []
+        self._seq_image_paths = []
         self._seq_boxes = []
 
         self.group_horizontal_flip = group_horizontal_flip
@@ -106,39 +106,44 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             specification as a dictionary with the following content:
                 'boxes': A Nx4 tensor of boxes in xyxy format.
                 'labels': A N, tensor of labels (0 indicates background).
-                'context_images': A list of tensors of contextual images.
+                'context_images': A list of tensors of contextual images
+                    (including the center image).
         """
-        seq_box_idx = self._global_to_local_seq_img_idxs[idx]
-        seq_idx, center_img_idx = seq_box_idx.seq_idx, seq_box_idx.img_idx
+        seq_box_idx = self._global_to_local_seq_image_idxs[idx]
+        seq_idx, center_image_idx = seq_box_idx.seq_idx, seq_box_idx.image_idx
 
-        img_file_paths = self._seq_img_paths[seq_idx]
+        image_file_paths = self._seq_image_paths[seq_idx]
         abs_context_idxs = np.clip(
-            self._context_rel_idxs + center_img_idx, 0, len(img_file_paths) - 1
+            self._context_rel_idxs + center_image_idx, 0,
+            len(image_file_paths) - 1
         )
 
-        # TODO Call transformations with both img and target.
+        # TODO Call transformations with both image and target.
         def _read_image(idx):
-            img_file_path = img_file_paths[idx]
-            img = Image.open(img_file_path)
+            image_file_path = image_file_paths[idx]
+            image = Image.open(image_file_path)
 
             if self.transforms is not None:
-                img = self.transforms(img)
+                image = self.transforms(image)
             
-            return img
+            return image
         
-        center_img = _read_image(center_img_idx)
+        center_image = None
         context_images = []
-        prev_idx = center_img_idx
-        image = center_img
+        prev_idx = -1
 
         for context_idx in abs_context_idxs:            
-            if prev_idx != context_idx:
+            if context_idx != prev_idx:
                 image = _read_image(context_idx)
+            if context_idx == center_image_idx:
+                center_image = image
             context_images.append(image)
 
             prev_idx = context_idx
+        
+        assert center_image is not None
 
-        boxes = self._seq_boxes[seq_idx][center_img_idx]
+        boxes = self._seq_boxes[seq_idx][center_image_idx]
         boxes_tensor = torch.as_tensor(boxes, dtype=torch.float32)
         labels = torch.ones((len(boxes),), dtype=torch.int64)
         target = {
@@ -147,7 +152,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             'context_images': context_images,
         }
 
-        return center_img, target
+        return center_image, target
 
     def __len__(self):
         """Returns the length of the dataset. It represents the number of
@@ -156,7 +161,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         Returns:
             int: Dataset length.
         """
-        return len(self._global_to_local_seq_img_idxs)
+        return len(self._global_to_local_seq_image_idxs)
 
     def _init_data_indices(self, root_path, subset):
         """Initializes data indices to faster access. It reads image (frame)
@@ -167,45 +172,47 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             root_path ([type]): UA-DETRAC dataset root path.
             subset ([type]): Whether to read 'train' or 'test' data subset.
         """
-        imgs_dir, annos_dir = self._deduce_imgs_and_annos_paths(
+        images_dir, annos_dir = self._deduce_images_and_annos_paths(
             root_path, subset
         )
 
-        for seq_idx, seq_dir in enumerate(imgs_dir.iterdir()):
+        for seq_idx, seq_dir in enumerate(images_dir.iterdir()):
             if seq_idx > 2:  # TODO Remove this ugly break.
                 break
 
             xml_file_name = seq_dir.stem + '_v3.xml'
             xml_file_path = str(annos_dir / xml_file_name)
 
-            img_files_iter = self._iter_seq_img_file_paths(seq_dir)
-            img_boxes_iter = self._iter_seq_boxes(xml_file_path)
-            data_iter = itertools.zip_longest(img_files_iter, img_boxes_iter)
+            image_files_iter = self._iter_seq_image_file_paths(seq_dir)
+            image_boxes_iter = self._iter_seq_boxes(xml_file_path)
+            data_iter = itertools.zip_longest(
+                image_files_iter, image_boxes_iter
+            )
 
-            seq_img_file_paths = []
-            seq_img_boxes = []
+            seq_image_file_paths = []
+            seq_image_boxes = []
 
-            for img_idx, (files_iter_data, boxes_iter_data) in enumerate(
+            for image_idx, (files_iter_data, boxes_iter_data) in enumerate(
                 data_iter
             ):
                 assert files_iter_data is not None
                 assert boxes_iter_data is not None
 
-                img_num_1, img_file_path = files_iter_data
-                img_num_2, boxes = boxes_iter_data
-                assert img_num_1 == img_num_2 
+                image_num_1, image_file_path = files_iter_data
+                image_num_2, boxes = boxes_iter_data
+                assert image_num_1 == image_num_2 
 
-                seq_img_file_paths.append(img_file_path)
-                seq_img_boxes.append(boxes)
+                seq_image_file_paths.append(image_file_path)
+                seq_image_boxes.append(boxes)
 
-                seq_boxes_idx = self._SeqBoxesIndex(seq_idx, img_idx)
-                self._global_to_local_seq_img_idxs.append(seq_boxes_idx)
+                seq_boxes_idx = self._SeqBoxesIndex(seq_idx, image_idx)
+                self._global_to_local_seq_image_idxs.append(seq_boxes_idx)
             
-            self._seq_img_paths.append(seq_img_file_paths)
-            self._seq_boxes.append(seq_img_boxes)
+            self._seq_image_paths.append(seq_image_file_paths)
+            self._seq_boxes.append(seq_image_boxes)
 
     @staticmethod
-    def _deduce_imgs_and_annos_paths(root_path, subset):
+    def _deduce_images_and_annos_paths(root_path, subset):
         """Deduces paths for images and annotations. It returns the root path
         that contains all the sequences belonging to the specific subset.
 
@@ -222,13 +229,13 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         subset = subset.capitalize()
         root_dir = Path(root_path)
 
-        imgs_dir = root_dir / ('Insight-MVT_Annotation_' + subset)
+        images_idr = root_dir / ('Insight-MVT_Annotation_' + subset)
         annos_dir = root_dir / 'DETRAC_public' / ('540p-' + subset)
 
-        return imgs_dir, annos_dir
+        return images_idr, annos_dir
     
     @staticmethod
-    def _iter_seq_img_file_paths(seq_dir):
+    def _iter_seq_image_file_paths(seq_dir):
         """Iterates over image file names for a specific sequence from the
         UA-DETRAC dataset.
 
@@ -239,10 +246,10 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             Tuple[int, str]: Yield tuples containing image (frame) number and
             the corresponding file path.
         """
-        img_num_path_pairs = [
+        image_num_path_pairs = [
             (int(p.stem[-5:]), str(p)) for p in seq_dir.iterdir()
         ]
-        yield from iter(sorted(img_num_path_pairs))
+        yield from iter(sorted(image_num_path_pairs))
 
     @staticmethod
     def _iter_seq_boxes(xml_file_path):
@@ -279,31 +286,9 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             yield frame_num, boxes
 
 
-def collate_context_images_batch_on_device(batch, device=None):
-    if device is None:
-        device = torch.device('cpu')
-    
-    imgs, targets = [], []
-    for img, target in batch:
-        new_target = {}
-        for key, val in target.items():
-            if isinstance(val, torch.Tensor):
-                new_val = val.to(device)
-            elif isinstance(val, (list, tuple)):
-                new_val = []
-                for item in val:
-                    if isinstance(item, torch.Tensor):
-                        item = item.to(device)
-                    new_val.append(item)
-            else:
-                new_val = val
-
-            new_target[key] = new_val
-        
-        imgs.append(img.to(device))
-        targets.append(new_target)
-    
-    return imgs, targets
+def collate_context_images_batch(batch):
+    images, targets = map(list, zip(*batch))
+    return images, targets
 
 
 def make_transforms(cfg, train=True):
@@ -336,19 +321,7 @@ def make_uadetrac_dataset(cfg, train=True):
     return dataset
 
 
-def make_batch_collator(cfg):
-    device = torch.device(cfg.DEVICE)
-
-    def _collate_batch(batch):
-        return collate_context_images_batch_on_device(batch, device)
-    
-    return _collate_batch
-
-
-def make_data_loader(cfg, dataset, collate_fn=None):
-    if collate_fn is None:
-        collate_fn = make_batch_collator(cfg)
-    
+def make_data_loader(cfg, dataset, collate_fn=collate_context_images_batch):
     data_loader = DataLoader(
         dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
         shuffle=cfg.DATA_LOADER.SHUFFLE,
@@ -365,9 +338,10 @@ def _calc_context_rel_idxs(past_context, future_context, stride):
     assert stride > 0
 
     past_idxs = np.arange(-past_context, 0, stride)
+    center_idx = np.asarray([0])
     future_idxs = np.arange(1, future_context + 1, stride)
 
-    idxs = np.concatenate((past_idxs, future_idxs))
+    idxs = np.concatenate((past_idxs, center_idx, future_idxs))
     
     return idxs
 
@@ -380,25 +354,26 @@ if __name__ == '__main__':
     from config import cfg
 
     
-    def tensor_to_cv_img(img_tensor, max_size=None):
-        img = img_tensor.cpu().numpy()  # [C,H,W]
-        img = np.transpose(img, (1, 2, 0))  # [H,W,C]
-        img = img[..., ::-1]
+    def tensor_to_cv_image(image_tensor, max_size=None):
+        image = image_tensor.cpu().numpy()  # [C,H,W]
+        image = np.transpose(image, (1, 2, 0))  # [H,W,C]
+        image = image[..., ::-1]
 
         if max_size is not None:
-            height, width, _ = img.shape
+            height, width, _ = image.shape
             max_side = max(height, width)
             
             if max_side > max_size:
                 scale = max_size / max_side
-                img = cv.resize(
-                    img, None, fx=scale, fy=scale, interpolation=cv.INTER_CUBIC
+                image = cv.resize(
+                    image, None, fx=scale, fy=scale,
+                    interpolation=cv.INTER_CUBIC
                 )
         
-        return img
+        return image
     
 
-    class ImgBatchVisualizer:
+    class ImageBatchVisualizer:
         def __init__(
             self,
             cfg,
@@ -424,25 +399,21 @@ if __name__ == '__main__':
         def __exit__(self, exc_type, exc_val, exc_tb):
             cv.destroyWindow(self.win_name)
         
-        def preview_batch_imgs(self, imgs, targets):
-            img_rows = []
+        def preview_batch_images(self, images, targets):
+            image_rows = []
 
-            _to_cv_img = functools.partial(
-                tensor_to_cv_img, max_size=self.max_size
+            _to_cv_image = functools.partial(
+                tensor_to_cv_image, max_size=self.max_size
             )
 
-            for img_tensor, target in zip(imgs, targets):
-                center_img = _to_cv_img(img_tensor)
-                img_cols = list(map(_to_cv_img, target['context_images']))
-                center_img = _to_cv_img(img_tensor)
-                img_cols.insert(self.past_context, center_img)
-
-                img_cols_merged = np.hstack(img_cols)
-                img_rows.append(img_cols_merged)
+            for _, target in zip(images, targets):
+                image_cols = list(map(_to_cv_image, target['context_images']))
+                image_cols_merged = np.hstack(image_cols)
+                image_rows.append(image_cols_merged)
             
-            img_final = np.vstack(img_rows)
+            image_final = np.vstack(image_rows)
 
-            cv.imshow(self.win_name, img_final)
+            cv.imshow(self.win_name, image_final)
             key = cv.waitKey(0) & 0xff
 
             return key != ord(self.quit_key)
@@ -450,7 +421,7 @@ if __name__ == '__main__':
         @staticmethod
         def _calc_temporal_win_size(past_context, future_context, stride):
             # TODO Implement better, purely arithmetic-based solution.
-            return 1 + len(_calc_context_rel_idxs(
+            return len(_calc_context_rel_idxs(
                 past_context, future_context, stride
             ))
 
@@ -459,7 +430,7 @@ if __name__ == '__main__':
 
     n_batches_shown = 4
 
-    with ImgBatchVisualizer(cfg, max_size=400) as visualizer:
-        for imgs, targets in itertools.islice(data_loader, n_batches_shown):
-            if not visualizer.preview_batch_imgs(imgs, targets):
+    with ImageBatchVisualizer(cfg, max_size=400) as visualizer:
+        for images, targets in itertools.islice(data_loader, n_batches_shown):
+            if not visualizer.preview_batch_images(images, targets):
                 break

@@ -34,16 +34,28 @@ def train_one_epoch(
     model,
     optimizer,
     data_loader,
+    device,
     epoch,
     print_freq,
     scaler=None
 ):
     model.train()
     metric_logger = MetricLogger(delimiter="  ")
-    metric_logger.add_meter("lr", SmoothedValue(window_size=1, fmt="{value:.6f}"))
+    metric_logger.add_meter(
+        'lr', SmoothedValue(window_size=1, fmt="{value:.6f}")
+    )
     header = f"Epoch: [{epoch}]"
 
-    for images, targets in metric_logger.log_every(data_loader, print_freq, header):
+    for images, targets in metric_logger.log_every(
+        data_loader, print_freq, header
+    ):
+        # images = [image.to(device) for image in images]
+        images = _to_device(images, device)
+        targets = [
+            {key:_to_device(val, device) for key, val in target.items()}
+            for target in targets
+        ]
+
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             loss_dict = model(images, targets)
             losses = sum(loss for loss in loss_dict.values())
@@ -69,6 +81,16 @@ def train_one_epoch(
             optimizer.step()
 
         metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(lr=optimizer.param_groups[0]['lr'])
 
     return metric_logger
+
+
+def _to_device(val, device):
+    if isinstance(val, torch.Tensor):
+        val = val.to(device)
+    elif isinstance(val, list):
+        for i in range(len(val)):
+            elem = val[i]
+            val[i] = _to_device(elem)
+    return val

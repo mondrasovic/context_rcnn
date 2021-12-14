@@ -70,7 +70,7 @@ def train(device):
 
     for epoch in range(1, num_epochs + 1):
         train_one_epoch(
-            model, optimizer, data_loader, epoch, print_freq=print_freq
+            model, optimizer, data_loader, device, epoch, print_freq=print_freq
         )
         lr_scheduler.step()
         # evaluate(model, data_loader_va, device=device)
