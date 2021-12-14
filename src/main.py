@@ -31,7 +31,7 @@ from .config import cfg
 from .datasets import make_uadetrac_dataset, make_data_loader
 from .models import make_object_detection_model
 from .optim import make_optimizer, make_lr_scheduler
-from .train import train_one_epoch
+from .train import do_train
 from .eval import evaluate
 
 
@@ -44,6 +44,15 @@ def parse_args():
         '-c', '--config', help="path to the YAML configuration file"
     )
     parser.add_argument(
+        '--checkpoints-dir', help="path to the directory containing checkpoints"
+    )
+    parser.add_argument(
+        '--checkpoint-file',
+        help="specific checkpoint file to restore the model training or "
+        "evaluating from"
+    )
+
+    parser.add_argument(
         'opts', metavar='OPTIONS', nargs=argparse.REMAINDER,
         help="overwriting the default YAML configuration"
     )
@@ -51,29 +60,6 @@ def parse_args():
     args = parser.parse_args()
 
     return args
-
-
-def train(device):
-    dataset = make_uadetrac_dataset(cfg)
-    data_loader = make_data_loader(cfg, dataset)
-    data_loader_va = make_data_loader(cfg, dataset)
-
-    model = make_object_detection_model(cfg).to(device)
-
-    optimizer = make_optimizer(cfg, model)
-    lr_scheduler = make_lr_scheduler(cfg, optimizer)
-
-    model.train()
-
-    num_epochs = cfg.TRAIN.N_EPOCHS
-    print_freq = cfg.TRAIN.PRINT_FREQ
-
-    for epoch in range(1, num_epochs + 1):
-        train_one_epoch(
-            model, optimizer, data_loader, device, epoch, print_freq=print_freq
-        )
-        lr_scheduler.step()
-        # evaluate(model, data_loader_va, device=device)
 
 
 def main():
@@ -86,7 +72,24 @@ def main():
     cfg.freeze()
 
     device = torch.device(cfg.DEVICE)
-    train(device)
+
+    dataset = make_uadetrac_dataset(cfg)
+    data_loader = make_data_loader(cfg, dataset)
+
+    model = make_object_detection_model(cfg).to(device)
+
+    optimizer = make_optimizer(cfg, model)
+    lr_scheduler = make_lr_scheduler(cfg, optimizer)
+
+    n_epochs = cfg.TRAIN.N_EPOCHS
+    checkpoint_save_freq = cfg.TRAIN.CHECKPOINT_SAVE_FREQ
+    print_freq = cfg.TRAIN.PRINT_FREQ
+
+    do_train(
+        model, optimizer, lr_scheduler, data_loader, device, n_epochs,
+        args.checkpoints_dir, args.checkpoint_file, checkpoint_save_freq,
+        print_freq
+    )
 
     return 0
 

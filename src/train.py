@@ -23,6 +23,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
 import math
+import os
 import sys
 
 import torch
@@ -30,7 +31,39 @@ import torch
 from .utils import MetricLogger, SmoothedValue, reduce_dict
 
 
-def train_one_epoch(
+def do_train(
+    model,
+    optimizer,
+    lr_scheduler,
+    data_loader,
+    device,
+    n_epochs,
+    checkpoints_dir_path=None,
+    checkpoint_file_path=None,
+    checkpoint_save_freq=None,
+    print_freq=10,
+):
+    start_epoch = 1
+
+    if checkpoint_file_path:
+        start_epoch = _load_checkpoint(
+            checkpoint_file_path, model, optimizer, lr_scheduler
+        )
+    
+    for epoch in range(start_epoch, n_epochs + 1):
+        _train_one_epoch(
+            model, optimizer, data_loader, device, epoch, print_freq=print_freq
+        )
+        lr_scheduler.step()
+
+        if checkpoints_dir_path and ((epoch % checkpoint_save_freq) == 0):
+            _save_checkpoint(
+                checkpoints_dir_path, model, optimizer, lr_scheduler, epoch
+            )
+        # evaluate(model, data_loader_va, device=device)
+
+
+def _train_one_epoch(
     model,
     optimizer,
     data_loader,
@@ -40,16 +73,16 @@ def train_one_epoch(
     scaler=None
 ):
     model.train()
-    metric_logger = MetricLogger(delimiter="  ")
+
+    metric_logger = MetricLogger(delimiter='  ')
     metric_logger.add_meter(
-        'lr', SmoothedValue(window_size=1, fmt="{value:.6f}")
+        'lr', SmoothedValue(window_size=1, fmt='{value:.6f}')
     )
     header = f"Epoch: [{epoch}]"
 
     for images, targets in metric_logger.log_every(
         data_loader, print_freq, header
     ):
-        # images = [image.to(device) for image in images]
         images = _to_device(images, device)
         targets = [
             {key:_to_device(val, device) for key, val in target.items()}
@@ -59,8 +92,7 @@ def train_one_epoch(
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             loss_dict = model(images, targets)
             losses = sum(loss for loss in loss_dict.values())
-
-        # reduce losses over all GPUs for logging purposes
+        
         loss_dict_reduced = reduce_dict(loss_dict)
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
 
@@ -84,6 +116,38 @@ def train_one_epoch(
         metric_logger.update(lr=optimizer.param_groups[0]['lr'])
 
     return metric_logger
+
+
+def _save_checkpoint(
+    checkpoints_dir_path,
+    model,
+    optimizer,
+    lr_scheduler,
+    epoch
+):
+    checkpoint = {
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'lr_scheduler': lr_scheduler.state_dict(),
+        'epoch': epoch,
+    }
+
+    file_name = f'checkpoint_{epoch:03d}.pth'
+    checkpoint_file_path = os.path.join(checkpoints_dir_path, file_name)
+    
+    os.makedirs(checkpoints_dir_path, exist_ok=True)
+    torch.save(checkpoint, checkpoint_file_path)
+
+
+def _load_checkpoint(checkpoint_file_path, model, optimizer, lr_scheduler):
+    checkpoint = torch.load(checkpoint_file_path)
+
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+    start_epoch = checkpoint['epoch'] + 1
+
+    return start_epoch
 
 
 def _to_device(val, device):

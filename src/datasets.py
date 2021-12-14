@@ -169,17 +169,14 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         format for faster access later on.
 
         Args:
-            root_path ([type]): UA-DETRAC dataset root path.
-            subset ([type]): Whether to read 'train' or 'test' data subset.
+            root_path (str): UA-DETRAC dataset root path.
+            subset (str): Whether to read 'train' or 'test' data subset.
         """
         images_dir, annos_dir = self._deduce_images_and_annos_paths(
             root_path, subset
         )
 
         for seq_idx, seq_dir in enumerate(images_dir.iterdir()):
-            if seq_idx > 2:  # TODO Remove this ugly break.
-                break
-
             xml_file_name = seq_dir.stem + '_v3.xml'
             xml_file_path = str(annos_dir / xml_file_name)
 

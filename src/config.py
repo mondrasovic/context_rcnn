@@ -89,6 +89,7 @@ _C.LR_SCHED.GAMMA = 0.1
 _C.TRAIN = CN()
 
 _C.TRAIN.N_EPOCHS = 10
+_C.TRAIN.CHECKPOINT_SAVE_FREQ = 1
 _C.TRAIN.PRINT_FREQ = 5
 
 # ------------------------------------------------------------------------------ 
