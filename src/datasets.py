@@ -180,30 +180,21 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             xml_file_name = seq_dir.stem + '_v3.xml'
             xml_file_path = str(annos_dir / xml_file_name)
 
-            image_files_iter = self._iter_seq_image_file_paths(seq_dir)
-            image_boxes_iter = self._iter_seq_boxes(xml_file_path)
-            data_iter = itertools.zip_longest(
-                image_files_iter, image_boxes_iter
-            )
+            image_boxes_map = dict(self._iter_seq_boxes(xml_file_path))
 
             seq_image_file_paths = []
             seq_image_boxes = []
 
-            for image_idx, (files_iter_data, boxes_iter_data) in enumerate(
-                data_iter
+            for image_idx, (image_num, image_file_path) in enumerate(
+                self._iter_seq_image_file_paths(seq_dir)
             ):
-                assert files_iter_data is not None
-                assert boxes_iter_data is not None
+                boxes = image_boxes_map.get(image_num)
+                if boxes is not None:
+                    seq_image_file_paths.append(image_file_path)
+                    seq_image_boxes.append(boxes)
 
-                image_num_1, image_file_path = files_iter_data
-                image_num_2, boxes = boxes_iter_data
-                assert image_num_1 == image_num_2 
-
-                seq_image_file_paths.append(image_file_path)
-                seq_image_boxes.append(boxes)
-
-                seq_boxes_idx = self._SeqBoxesIndex(seq_idx, image_idx)
-                self._global_to_local_seq_image_idxs.append(seq_boxes_idx)
+                    seq_boxes_idx = self._SeqBoxesIndex(seq_idx, image_idx)
+                    self._global_to_local_seq_image_idxs.append(seq_boxes_idx)
             
             self._seq_image_paths.append(seq_image_file_paths)
             self._seq_boxes.append(seq_image_boxes)
@@ -240,7 +231,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             seq_dir (pathlib.Path): Sequence directory path.
 
         Yields:
-            Tuple[int, str]: Yield tuples containing image (frame) number and
+            Tuple[int, str]: Tuple containing image (frame) number and
             the corresponding file path.
         """
         image_num_path_pairs = [
@@ -334,9 +325,9 @@ def _calc_context_rel_idxs(past_context, future_context, stride):
     assert future_context >= 0
     assert stride > 0
 
-    past_idxs = np.arange(-past_context, 0, stride)
+    past_idxs = -np.flip(np.arange(stride, past_context + 1, stride))
     center_idx = np.asarray([0])
-    future_idxs = np.arange(1, future_context + 1, stride)
+    future_idxs = np.arange(stride, future_context + 1, stride)
 
     idxs = np.concatenate((past_idxs, center_idx, future_idxs))
     
