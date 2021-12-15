@@ -165,8 +165,8 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
 
     def _init_data_indices(self, root_path, subset):
         """Initializes data indices to faster access. It reads image (frame)
-        file names as well as their corresponding bounding boxes in a tensor
-        format for faster access later on.
+        file names as well as their corresponding bounding boxes for faster
+        access later on.
 
         Args:
             root_path (str): UA-DETRAC dataset root path.
