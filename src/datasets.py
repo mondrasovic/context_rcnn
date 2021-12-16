@@ -172,9 +172,6 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         )
 
         for seq_idx, seq_dir in enumerate(images_dir.iterdir()):
-            if seq_idx > 0:  # TODO Remove this idiotic break.
-                break
-
             xml_file_name = seq_dir.stem + '_v3.xml'
             xml_file_path = str(annos_dir / xml_file_name)
 
@@ -186,9 +183,6 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             for image_idx, (image_num, image_file_path) in enumerate(
                 self._iter_seq_image_file_paths(seq_dir)
             ):
-                if image_idx > 100:  # TODO Remove this idiotic break.
-                    break
-
                 boxes = image_boxes_map.get(image_num)
                 if boxes is not None:
                     seq_image_file_paths.append(image_file_path)
@@ -299,11 +293,13 @@ def make_transforms(cfg, train=True):
     return transforms
 
 
-def make_dataset(cfg, train=True):
+def make_dataset(cfg, *, train=True):
     transforms = make_transforms(cfg, train)
 
+    subset = 'train' if train else 'test'
+
     dataset = UADetracContextDetectionDataset(
-        cfg.DATASET.ROOT_PATH, past_context=cfg.DATASET.PAST_CONTEXT,
+        cfg.DATASET.ROOT_PATH, subset, past_context=cfg.DATASET.PAST_CONTEXT,
         future_context=cfg.DATASET.FUTURE_CONTEXT,
         context_stride=cfg.DATASET.CONTEXT_STRIDE, transforms=transforms
     )
@@ -316,7 +312,7 @@ def make_data_loader(cfg, dataset, collate_fn=collate_context_images_batch):
         dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
         shuffle=cfg.DATA_LOADER.SHUFFLE,
         num_workers=cfg.DATA_LOADER.N_WORKERS,
-        collate_fn=collate_fn
+        collate_fn=collate_fn, pin_memory=True
     )
 
     return data_loader

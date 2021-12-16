@@ -76,9 +76,10 @@ def main():
 
     device = torch.device(cfg.DEVICE)
 
-    dataset = make_dataset(cfg)
-    data_loader = make_data_loader(cfg, dataset)
-    data_loader_va = make_data_loader(cfg, dataset)
+    dataset_tr = make_dataset(cfg, train=True)
+    dataset_va = make_dataset(cfg, train=False)
+    data_loader_tr = make_data_loader(cfg, dataset_tr)
+    data_loader_va = make_data_loader(cfg, dataset_va)
 
     model = make_object_detection_model(cfg).to(device)
 
@@ -91,7 +92,7 @@ def main():
     print_freq = cfg.TRAIN.PRINT_FREQ
 
     do_train(
-        model, optimizer, lr_scheduler, data_loader, device, n_epochs,
+        model, optimizer, lr_scheduler, data_loader_tr, device, n_epochs,
         data_loader_va, eval_freq, args.checkpoints_dir, args.checkpoint_file,
         checkpoint_save_freq, print_freq, args.log_dir
     )
