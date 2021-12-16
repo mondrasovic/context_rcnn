@@ -28,7 +28,7 @@ import sys
 import torch
 
 from .config import cfg
-from .datasets import make_uadetrac_dataset, make_data_loader
+from .datasets import make_dataset, make_data_loader
 from .models import make_object_detection_model
 from .optim import make_optimizer, make_lr_scheduler
 from .train import do_train
@@ -73,8 +73,9 @@ def main():
 
     device = torch.device(cfg.DEVICE)
 
-    dataset = make_uadetrac_dataset(cfg)
+    dataset = make_dataset(cfg)
     data_loader = make_data_loader(cfg, dataset)
+    data_loader_va = make_data_loader(cfg, dataset)
 
     model = make_object_detection_model(cfg).to(device)
 
@@ -87,8 +88,8 @@ def main():
 
     do_train(
         model, optimizer, lr_scheduler, data_loader, device, n_epochs,
-        args.checkpoints_dir, args.checkpoint_file, checkpoint_save_freq,
-        print_freq
+        data_loader_va, args.checkpoints_dir, args.checkpoint_file,
+        checkpoint_save_freq, print_freq
     )
 
     return 0

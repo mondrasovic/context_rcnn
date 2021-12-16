@@ -29,6 +29,7 @@ import sys
 import torch
 
 from .utils import MetricLogger, SmoothedValue, reduce_dict
+from .eval import evaluate
 
 
 def do_train(
@@ -38,6 +39,7 @@ def do_train(
     data_loader,
     device,
     n_epochs,
+    data_loader_va=None,
     checkpoints_dir_path=None,
     checkpoint_file_path=None,
     checkpoint_save_freq=None,
@@ -60,7 +62,9 @@ def do_train(
             _save_checkpoint(
                 checkpoints_dir_path, model, optimizer, lr_scheduler, epoch
             )
-        # evaluate(model, data_loader_va, device=device)
+        
+        if data_loader_va is not None:
+            evaluate(model, data_loader_va, device=device)
 
 
 def _train_one_epoch(

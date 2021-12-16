@@ -33,8 +33,8 @@ _C.DEVICE = 'cuda:0'
 # ------------------------------------------------------------------------------
 _C.DATASET = CN()
 
-_C.DATASET.ROOT_PATH = '../../datasets/UA-DETRAC'
-_C.DATASET.SUBSET = 'train'
+_C.DATASET.ROOT_PATH = '../../datasets/UA-DETRAC_COCO/data'
+_C.DATASET.ANNO_PATH = '../../datasets/UA-DETRAC_COCO/annotations.json'
 
 _C.DATASET.PAST_CONTEXT = 4
 _C.DATASET.FUTURE_CONTEXT = 4
@@ -60,7 +60,7 @@ _C.DATA_LOADER.N_WORKERS = 4
 # ------------------------------------------------------------------------------
 _C.MODEL = CN()
 
-_C.MODEL.NAME = 'ContextRCNN'  # Either 'FasterRCNN' or 'ContextRCNN'.
+_C.MODEL.NAME = 'FasterRCNN'  # Either 'FasterRCNN' or 'ContextRCNN'.
 _C.MODEL.PRETRAINED_BACKBONE = True
 _C.MODEL.TRAINABLE_BACKBONE_LAYERS = 3
 _C.MODEL.N_CLASSES = 2  # 0 - background, 1 - vehicle

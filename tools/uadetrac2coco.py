@@ -21,12 +21,18 @@ def iter_image_boxes_pairs(root_path, subset):
     images_dir, annos_dir = _deduce_images_and_annos_paths(root_path, subset)
 
     for seq_num, seq_dir in enumerate(images_dir.iterdir(), start=1):
+        if seq_num > 1:
+            break
+
         xml_file_name = seq_dir.stem + '_v3.xml'
         xml_file_path = str(annos_dir / xml_file_name)
 
         image_boxes_map = dict(_iter_seq_boxes(xml_file_path))
 
         for image_num, image_file_path in _iter_seq_image_file_paths(seq_dir):
+            if image_num > 100:
+                break
+
             boxes = image_boxes_map.get(image_num)
             if boxes is not None:
                 yield seq_num, image_num, image_file_path, boxes
@@ -106,8 +112,9 @@ def _deduce_images_and_annos_paths(root_path, subset):
     return images_idr, annos_dir
 
 
-def export_dataset(dataset_input_dir, dataset_output_dir, subset, dataset_name):
-    images_dir_path = os.path.join(dataset_output_dir, dataset_name)
+def export_dataset(dataset_input_dir, dataset_output_dir, dataset_name, subset):
+    dataset_output_dir = os.path.join(dataset_output_dir, dataset_name)
+    images_dir_path = os.path.join(dataset_output_dir, 'data')
 
     if os.path.exists(dataset_output_dir):
         shutil.rmtree(dataset_output_dir)
@@ -136,19 +143,22 @@ def export_dataset(dataset_input_dir, dataset_output_dir, subset, dataset_name):
     with tqdm_pbar as pbar:
         data_iter = iter_image_boxes_pairs(dataset_input_dir, subset)
         for seq_num, image_num, image_file_path, boxes in data_iter:
-            pbar.set_description("processing sample: " + image_file_path)
+            pbar.set_description(
+                f"processing seq. {seq_num}, sample {image_file_path}"
+            )
 
-            dst_file_name = f'{seq_num:02d}_{image_num:06d}.jpg'
-            dst_file_path = os.path.join(dataset_output_dir, dst_file_name)
-            # TODO Copy file.
+            dst_file_name = f'{seq_num:02d}_{image_num:04d}.jpg'
+            dst_file_path = os.path.join(images_dir_path, dst_file_name)
+            shutil.copyfile(image_file_path, dst_file_path)
+
             image_id = next(image_id_gen)
             image_data = {
                 'id': image_id,
-                'file_name': '',
+                'file_name': dst_file_name,
+                'seq_num': seq_num,
+                'image_num': image_num,
                 'height': image_height,
                 'width': image_width,
-                'license': None,
-                'coco_url': None,
             }
             images.append(image_data)
 
@@ -173,7 +183,7 @@ def export_dataset(dataset_input_dir, dataset_output_dir, subset, dataset_name):
 @click.argument('dataset_root_dir')
 @click.argument('export_dir')
 @click.option(
-    '--dataset-name', default='UA-DETRAC-COCO', show_default=True,
+    '--dataset-name', default='UA-DETRAC_COCO', show_default=True,
     help="The new dataset name."
 )
 @click.option(
@@ -181,6 +191,7 @@ def export_dataset(dataset_input_dir, dataset_output_dir, subset, dataset_name):
     help="Data subset type."
 )
 def main(dataset_root_dir, export_dir, dataset_name, subset):
+    export_dataset(dataset_root_dir, export_dir, dataset_name, subset)
     return 0
 
 
