@@ -25,12 +25,13 @@
 # Code adapted from:
 # https://github.com/pytorch/vision/blob/main/references/detection/utils.py
 
+import functools
 import time
 
 import torch
 import torchvision
 
-from .utils import MetricLogger
+from .utils import MetricLogger, to_device
 from .coco_utils import get_coco_api_from_dataset
 from .coco_eval import CocoEvaluator
 
@@ -56,17 +57,21 @@ def evaluate(model, data_loader, device):
     metric_logger = MetricLogger(delimiter="  ")
     header = "Test:"
 
-    coco = get_coco_api_from_dataset(data_loader.dataset)
+    coco = get_or_create_coco_dataset(data_loader)
     iou_types = _get_iou_types(model)
     coco_evaluator = CocoEvaluator(coco, iou_types)
 
     for images, targets in metric_logger.log_every(data_loader, 100, header):
-        images = list(img.to(device) for img in images)
+        images = to_device(images, device)
+        targets = [
+            {key:to_device(val, device) for key, val in target.items()}
+            for target in targets
+        ]
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         model_time = time.time()
-        outputs = model(images)
+        outputs = model(images, targets)
 
         outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
         model_time = time.time() - model_time
@@ -88,3 +93,10 @@ def evaluate(model, data_loader, device):
     torch.set_num_threads(n_threads)
 
     return coco_evaluator
+
+
+@functools.lru_cache(typed=True)
+def get_or_create_coco_dataset(data_loader):
+    dataset = data_loader.dataset
+    coco = get_coco_api_from_dataset(dataset)
+    return coco

@@ -9,7 +9,7 @@
             "type": "python",
             "request": "launch",
             "module": "src.main",
-            "args": ["--checkpoints-dir", "../checkpoints"]
+            "args": ["--checkpoints-dir", "./checkpoints"]
         }
     ]
 }

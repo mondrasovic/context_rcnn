@@ -47,6 +47,9 @@ def parse_args():
         '--checkpoints-dir', help="path to the directory containing checkpoints"
     )
     parser.add_argument(
+        '--log-dir', help="Directory containing logs + tensorboard writer data."
+    )
+    parser.add_argument(
         '--checkpoint-file',
         help="specific checkpoint file to restore the model training or "
         "evaluating from"
@@ -83,13 +86,14 @@ def main():
     lr_scheduler = make_lr_scheduler(cfg, optimizer)
 
     n_epochs = cfg.TRAIN.N_EPOCHS
+    eval_freq = cfg.TRAIN.EVAL_FREQ
     checkpoint_save_freq = cfg.TRAIN.CHECKPOINT_SAVE_FREQ
     print_freq = cfg.TRAIN.PRINT_FREQ
 
     do_train(
         model, optimizer, lr_scheduler, data_loader, device, n_epochs,
-        data_loader_va, args.checkpoints_dir, args.checkpoint_file,
-        checkpoint_save_freq, print_freq
+        data_loader_va, eval_freq, args.checkpoints_dir, args.checkpoint_file,
+        checkpoint_save_freq, print_freq, args.log_dir
     )
 
     return 0

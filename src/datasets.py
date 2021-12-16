@@ -32,31 +32,6 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision import transforms as T
-from torchvision.datasets import CocoDetection
-
-
-class CocoContextDetection(CocoDetection):
-    def __init__(
-        self,
-        dataset_root_dir,
-        anno_file_path,
-        past_context,
-        future_context,
-        context_stride,
-        transforms=[]
-    ):
-        super().__init__(
-            dataset_root_dir, anno_file_path, transforms=transforms,
-            transform=None, target_transform=None
-        )
-
-        self._context_rel_idxs = _calc_context_rel_idxs(
-            past_context, future_context, context_stride
-        )
-    
-    def _load_target(self, id):
-        target = self.coco.loadAnns(self.coco.getAnnIds(id))
-        return target
 
 
 class UADetracContextDetectionDataset(torch.utils.data.Dataset):
@@ -82,7 +57,6 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         past_context=0,
         future_context=0,
         context_stride=1,
-        group_horizontal_flip=None,
         transforms=None
     ):
         """Constructor.
@@ -98,10 +72,6 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             context_stride (int, optional): A positive integer representing the
                 stride when traversing the past as well as future contextual
                 frames. Defaults to 1.
-            group_horizontal_flip (float, optional): If set, it should be a
-                float number in the <0, 1> interval representing the probability
-                of horizontally flipping all the images within a single group,
-                i.e., the center + the contextual images. Defaults to None.
             transforms (Callable, optional): Transformation to apply to
                 individual frames. Beware that if context is required, some
                 transformations may be nonsensical. Defaults to None.
@@ -114,7 +84,6 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         self._seq_image_paths = []
         self._seq_boxes = []
 
-        self.group_horizontal_flip = group_horizontal_flip
         self.transforms = transforms
 
         self._init_data_indices(root_path, subset)
@@ -142,16 +111,6 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             self._context_rel_idxs + center_image_idx, 0,
             len(image_file_paths) - 1
         )
-
-        # TODO Call transformations with both image and target.
-        def _read_image(idx):
-            image_file_path = image_file_paths[idx]
-            image = Image.open(image_file_path)
-
-            if self.transforms is not None:
-                image = self.transforms(image)
-            
-            return image
         
         center_image = None
         context_images = []
@@ -159,7 +118,8 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
 
         for context_idx in abs_context_idxs:            
             if context_idx != prev_idx:
-                image = _read_image(context_idx)
+                image_file_path = image_file_paths[context_idx]
+                image = Image.open(image_file_path)
             if context_idx == center_image_idx:
                 center_image = image
             context_images.append(image)
@@ -168,14 +128,24 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         
         assert center_image is not None
 
+        image_id = torch.as_tensor([idx], dtype=torch.int64)
         boxes = self._seq_boxes[seq_idx][center_image_idx]
-        boxes_tensor = torch.as_tensor(boxes, dtype=torch.float32)
+        boxes = torch.as_tensor(boxes, dtype=torch.float32)
+        areas = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
         labels = torch.ones((len(boxes),), dtype=torch.int64)
+        is_crowd = torch.zeros_like(labels)
+
         target = {
-            'boxes': boxes_tensor,
+            'image_id': image_id,
+            'boxes': boxes,
+            'area': areas,
             'labels': labels,
+            'iscrowd': is_crowd,
             'context_images': context_images,
         }
+
+        if self.transforms is not None:
+            center_image, target = self.transforms(center_image, target)
 
         return center_image, target
 
@@ -202,6 +172,9 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
         )
 
         for seq_idx, seq_dir in enumerate(images_dir.iterdir()):
+            if seq_idx > 0:  # TODO Remove this idiotic break.
+                break
+
             xml_file_name = seq_dir.stem + '_v3.xml'
             xml_file_path = str(annos_dir / xml_file_name)
 
@@ -213,6 +186,9 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             for image_idx, (image_num, image_file_path) in enumerate(
                 self._iter_seq_image_file_paths(seq_dir)
             ):
+                if image_idx > 100:  # TODO Remove this idiotic break.
+                    break
+
                 boxes = image_boxes_map.get(image_num)
                 if boxes is not None:
                     seq_image_file_paths.append(image_file_path)
@@ -299,30 +275,16 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             yield frame_num, boxes
 
 
-class CocoContextTransforms:
-    def __init__(self, image_transforms=None):
-        to_tensor = T.ToTensor()
-        
-        if image_transforms is None:
-            image_transforms = [to_tensor]
-        else:
-            if not isinstance(image_transforms, list, tuple):
-                image_transforms = [image_transforms]
-            image_transforms = [to_tensor] + image_transforms
-        
-        self.image_transforms = T.Compose(image_transforms)
-
+class ToTensor:
+    def __init__(self):
+        self.to_tensor = T.ToTensor()
+    
     def __call__(self, image, target):
-        image = self.image_transforms(image)
-        
-        target['boxes'] = torch.as_tensor(target['boxes'], dtype=torch.float32)
-        target['labels'] = torch.ones(
-            (len(target['labels']),), dtype=torch.int64
-        )
+        image = self.to_tensor(image)
         
         context_images = target.get('context_images') or []
         for i, context_image in enumerate(context_images):
-            context_images[i] = self.image_transforms(context_image)
+            context_images[i] = self.to_tensor(context_image)
         
         return image, target
 
@@ -333,29 +295,15 @@ def collate_context_images_batch(batch):
 
 
 def make_transforms(cfg, train=True):
-    image_transforms = []
-
-    if train:
-        if cfg.DATASET.AUG.GROUP_HORIZONTAL_FLIP:
-            pass  # TODO Implement this.
-
-        color_jitter = T.ColorJitter(
-            cfg.DATASET.AUG.BRIGHTNESS, cfg.DATASET.AUG.CONTRAST,
-            cfg.DATASET.AUG.SATURATION, cfg.DATASET.AUG.HUE
-        )
-        image_transforms.append(color_jitter)
-    
-    transforms = CocoContextTransforms(image_transforms)
-
+    transforms = ToTensor()
     return transforms
 
 
 def make_dataset(cfg, train=True):
     transforms = make_transforms(cfg, train)
 
-    dataset = CocoContextDetection(
-        cfg.DATASET.ROOT_PATH, cfg.DATASET.ANNO_PATH,
-        past_context=cfg.DATASET.PAST_CONTEXT,
+    dataset = UADetracContextDetectionDataset(
+        cfg.DATASET.ROOT_PATH, past_context=cfg.DATASET.PAST_CONTEXT,
         future_context=cfg.DATASET.FUTURE_CONTEXT,
         context_stride=cfg.DATASET.CONTEXT_STRIDE, transforms=transforms
     )

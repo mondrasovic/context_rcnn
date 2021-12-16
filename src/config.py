@@ -33,12 +33,11 @@ _C.DEVICE = 'cuda:0'
 # ------------------------------------------------------------------------------
 _C.DATASET = CN()
 
-_C.DATASET.ROOT_PATH = '../../datasets/UA-DETRAC_COCO/data'
-_C.DATASET.ANNO_PATH = '../../datasets/UA-DETRAC_COCO/annotations.json'
+_C.DATASET.ROOT_PATH = '../../datasets/UA-DETRAC'
 
-_C.DATASET.PAST_CONTEXT = 4
-_C.DATASET.FUTURE_CONTEXT = 4
-_C.DATASET.CONTEXT_STRIDE = 2
+_C.DATASET.PAST_CONTEXT = 0
+_C.DATASET.FUTURE_CONTEXT = 0
+_C.DATASET.CONTEXT_STRIDE = 1
 
 # ------------------------------------------------------------------------------ 
 _C.DATASET.AUG = CN()
@@ -53,14 +52,14 @@ _C.DATASET.AUG.HUE = 0
 # ------------------------------------------------------------------------------
 _C.DATA_LOADER = CN()
 
-_C.DATA_LOADER.BATCH_SIZE = 2
+_C.DATA_LOADER.BATCH_SIZE = 8
 _C.DATA_LOADER.SHUFFLE = True
 _C.DATA_LOADER.N_WORKERS = 4
 
 # ------------------------------------------------------------------------------
 _C.MODEL = CN()
 
-_C.MODEL.NAME = 'FasterRCNN'  # Either 'FasterRCNN' or 'ContextRCNN'.
+_C.MODEL.NAME = 'ContextRCNN'  # Either 'FasterRCNN' or 'ContextRCNN'.
 _C.MODEL.PRETRAINED_BACKBONE = True
 _C.MODEL.TRAINABLE_BACKBONE_LAYERS = 3
 _C.MODEL.N_CLASSES = 2  # 0 - background, 1 - vehicle
@@ -88,9 +87,9 @@ _C.LR_SCHED.GAMMA = 0.1
 # ------------------------------------------------------------------------------ 
 _C.TRAIN = CN()
 
-_C.TRAIN.N_EPOCHS = 10
-_C.TRAIN.CHECKPOINT_SAVE_FREQ = 1
-_C.TRAIN.PRINT_FREQ = 10
-
+_C.TRAIN.N_EPOCHS = 30
+_C.TRAIN.EVAL_FREQ = 1
+_C.TRAIN.PRINT_FREQ = 5
+_C.TRAIN.CHECKPOINT_SAVE_FREQ = 10
 # ------------------------------------------------------------------------------ 
 cfg = _C

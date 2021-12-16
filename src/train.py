@@ -28,7 +28,7 @@ import sys
 
 import torch
 
-from .utils import MetricLogger, SmoothedValue, reduce_dict
+from .utils import MetricLogger, SmoothedValue, reduce_dict, to_device
 from .eval import evaluate
 
 
@@ -40,10 +40,12 @@ def do_train(
     device,
     n_epochs,
     data_loader_va=None,
+    eval_freq=1,
     checkpoints_dir_path=None,
     checkpoint_file_path=None,
     checkpoint_save_freq=None,
     print_freq=10,
+    log_dir=None
 ):
     start_epoch = 1
 
@@ -51,7 +53,7 @@ def do_train(
         start_epoch = _load_checkpoint(
             checkpoint_file_path, model, optimizer, lr_scheduler
         )
-    
+
     for epoch in range(start_epoch, n_epochs + 1):
         _train_one_epoch(
             model, optimizer, data_loader, device, epoch, n_epochs, print_freq
@@ -63,7 +65,7 @@ def do_train(
                 checkpoints_dir_path, model, optimizer, lr_scheduler, epoch
             )
         
-        if data_loader_va is not None:
+        if (data_loader_va is not None) and ((epoch % eval_freq) == 0):
             evaluate(model, data_loader_va, device=device)
 
 
@@ -88,9 +90,9 @@ def _train_one_epoch(
     for images, targets in metric_logger.log_every(
         data_loader, print_freq, header
     ):
-        images = _to_device(images, device)
+        images = to_device(images, device)
         targets = [
-            {key:_to_device(val, device) for key, val in target.items()}
+            {key:to_device(val, device) for key, val in target.items()}
             for target in targets
         ]
 
@@ -153,13 +155,3 @@ def _load_checkpoint(checkpoint_file_path, model, optimizer, lr_scheduler):
     start_epoch = checkpoint['epoch'] + 1
 
     return start_epoch
-
-
-def _to_device(val, device):
-    if isinstance(val, torch.Tensor):
-        val = val.to(device)
-    elif isinstance(val, list):
-        for i in range(len(val)):
-            elem = val[i]
-            val[i] = _to_device(elem, device)
-    return val

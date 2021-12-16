@@ -307,3 +307,13 @@ def init_distributed_mode(args):
     )
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
+
+
+def to_device(val, device):
+    if isinstance(val, torch.Tensor):
+        val = val.to(device)
+    elif isinstance(val, list):
+        for i in range(len(val)):
+            elem = val[i]
+            val[i] = to_device(elem, device)
+    return val
