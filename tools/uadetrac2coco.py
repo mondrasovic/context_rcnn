@@ -168,7 +168,8 @@ def export_dataset(dataset_input_dir, dataset_output_dir, dataset_name, subset):
                     'image_id': image_id,
                     'category_id': vehicle_cat_id,
                     'bbox': box,
-                    'area': box[2] * box[3]
+                    'area': box[2] * box[3],
+                    'iscrowd': 0,
                 }
                 annotations.append(annotation)
 
