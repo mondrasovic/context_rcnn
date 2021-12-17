@@ -42,12 +42,12 @@ _C.DATASET.CONTEXT_STRIDE = 2
 # ------------------------------------------------------------------------------ 
 _C.DATASET.AUG = CN()
 
-_C.DATASET.AUG.GROUP_HORIZONTAL_FLIP = None
+_C.DATASET.AUG.HORIZONTAL_FLIP = None
 # Color jitter options.
-_C.DATASET.AUG.BRIGHTNESS = 0
-_C.DATASET.AUG.CONTRAST = 0
-_C.DATASET.AUG.SATURATION = 0
-_C.DATASET.AUG.HUE = 0
+_C.DATASET.AUG.BRIGHTNESS = 0.1
+_C.DATASET.AUG.CONTRAST = 0.1
+_C.DATASET.AUG.SATURATION = 0.1
+_C.DATASET.AUG.HUE = 0.1
 
 # ------------------------------------------------------------------------------
 _C.DATA_LOADER = CN()
@@ -89,7 +89,7 @@ _C.TRAIN = CN()
 
 _C.TRAIN.N_EPOCHS = 30
 _C.TRAIN.EVAL_FREQ = 3
-_C.TRAIN.PRINT_FREQ = 10
+_C.TRAIN.PRINT_FREQ = 20
 _C.TRAIN.CHECKPOINT_SAVE_FREQ = 3
 # ------------------------------------------------------------------------------ 
 cfg = _C
