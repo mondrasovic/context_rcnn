@@ -22,6 +22,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
+import abc
 import dataclasses
 import itertools
 from pathlib import Path
@@ -180,7 +181,9 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             seq_image_file_paths = []
             seq_image_boxes = []
 
-            for image_idx, (image_num, image_file_path) in enumerate(
+            image_idx_gen = itertools.count()
+
+            for image_num, image_file_path in enumerate(
                 self._iter_seq_image_file_paths(seq_dir)
             ):
                 boxes = image_boxes_map.get(image_num)
@@ -188,6 +191,7 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
                     seq_image_file_paths.append(image_file_path)
                     seq_image_boxes.append(boxes)
 
+                    image_idx = next(image_idx_gen)
                     seq_boxes_idx = self._SeqBoxesIndex(seq_idx, image_idx)
                     self._global_to_local_seq_image_idxs.append(seq_boxes_idx)
             
@@ -269,17 +273,52 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
             yield frame_num, boxes
 
 
-class ToTensor:
+
+def transform_center_and_context_images(image, target, transform):
+    image = transform(image)
+    
+    context_images = target.get('context_images') or []
+    for i, context_image in enumerate(context_images):
+        context_images[i] = transform(context_image)
+    
+    return image, target
+
+
+class TransformWithContext(abc.ABC):
+    @abc.abstractmethod
+    def __call__(self, image, target):
+        pass
+
+
+class ToTensorWithContext(TransformWithContext):
     def __init__(self):
         self.to_tensor = T.ToTensor()
     
     def __call__(self, image, target):
-        image = self.to_tensor(image)
-        
-        context_images = target.get('context_images') or []
-        for i, context_image in enumerate(context_images):
-            context_images[i] = self.to_tensor(context_image)
-        
+        image, target = transform_center_and_context_images(
+            image, target, self.to_tensor
+        )
+        return image, target
+
+
+class ColorJitterWithContext(TransformWithContext):
+    def __init__(self, brightness=0, contrast=0, saturation=0, hue=0):
+        self.color_jitter = T.ColorJitter(brightness, contrast, saturation, hue)
+    
+    def __call__(self, image, target):
+        image, target = transform_center_and_context_images(
+            image, target, self.color_jitter
+        )
+        return image, target
+
+
+class ComposeTransforms(TransformWithContext):
+    def __init__(self, transforms):
+        self.transforms = transforms
+
+    def __call__(self, image, target):
+        for transform in self.transforms:
+            image, target = transform(image, target)
         return image, target
 
 
@@ -289,7 +328,18 @@ def collate_context_images_batch(batch):
 
 
 def make_transforms(cfg, train=True):
-    transforms = ToTensor()
+    to_tensor = ToTensorWithContext()
+    transforms = [to_tensor]
+    
+    if train:
+        color_jitter = ColorJitterWithContext(
+            cfg.DATASET.AUG.BRIGHTNESS, cfg.DATASET.AUG.CONTRAST,
+            cfg.DATASET.AUG.SATURATION, cfg.DATASET.AUG.HUE
+        )
+        transforms.append(color_jitter)
+    
+    transforms = ComposeTransforms(transforms)
+
     return transforms
 
 
@@ -308,11 +358,13 @@ def make_dataset(cfg, *, train=True):
 
 
 def make_data_loader(cfg, dataset, collate_fn=collate_context_images_batch):
+    pin_memory = torch.cuda.is_available()
+    
     data_loader = DataLoader(
         dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
         shuffle=cfg.DATA_LOADER.SHUFFLE,
         num_workers=cfg.DATA_LOADER.N_WORKERS,
-        collate_fn=collate_fn, pin_memory=True
+        collate_fn=collate_fn, pin_memory=pin_memory
     )
 
     return data_loader
