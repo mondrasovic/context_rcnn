@@ -701,7 +701,8 @@ def make_faster_rcnn_model(cfg):
     """
     model = fasterrcnn_resnet50_fpn(
         pretrained_backbone=cfg.MODEL.PRETRAINED_BACKBONE,
-        trainable_backbone_layers=cfg.MODEL.TRAINABLE_BACKBONE_LAYERS
+        trainable_backbone_layers=cfg.MODEL.TRAINABLE_BACKBONE_LAYERS,
+        min_size=540, max_size=960
     )
     num_classes = cfg.MODEL.N_CLASSES
     in_features = model.roi_heads.box_predictor.cls_score.in_features

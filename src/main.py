@@ -23,6 +23,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
 import argparse
+import logging
+import os
 import sys
 
 import torch
@@ -32,7 +34,6 @@ from .datasets import make_dataset, make_data_loader
 from .models import make_object_detection_model
 from .optim import make_optimizer, make_lr_scheduler
 from .train import do_train
-from .eval import evaluate
 
 
 def parse_args():
@@ -47,12 +48,17 @@ def parse_args():
         '--checkpoints-dir', help="path to the directory containing checkpoints"
     )
     parser.add_argument(
-        '--log-dir', help="Directory containing logs + tensorboard writer data."
+        '--log-dir', default='./logs', help="Directory containing logs, "
+        "tensorboard writer data or test evaluations."
     )
     parser.add_argument(
         '--checkpoint-file',
         help="specific checkpoint file to restore the model training or "
         "evaluating from"
+    )
+    parser(
+        '--test-only', action='store_true',
+        help="Executes model evaluation from a given checkpoint file."
     )
 
     parser.add_argument(
@@ -74,6 +80,12 @@ def main():
         cfg.merge_from_list(args.opts)
     cfg.freeze()
 
+    log_file_path = os.path.join(args.log_dir, 'logs.log')
+    logging.basicConfig(
+        filename=log_file_path, filemode='w',
+        format='%(asctime)s %(levelname)s:%(message)s', level=logging.DEBUG
+    )
+    
     device = torch.device(cfg.DEVICE)
 
     dataset_tr = make_dataset(cfg, train=True)

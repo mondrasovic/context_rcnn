@@ -26,6 +26,7 @@
 # https://github.com/pytorch/vision/blob/main/references/detection/utils.py
 
 import functools
+import logging
 import time
 
 import torch
@@ -36,28 +37,23 @@ from .coco_utils import get_coco_api_from_dataset
 from .coco_eval import CocoEvaluator
 
 
-def _get_iou_types(model):
-    model_without_ddp = model
-    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-        model_without_ddp = model.module
-    iou_types = ["bbox"]
-    if isinstance(model_without_ddp, torchvision.models.detection.MaskRCNN):
-        iou_types.append("segm")
-    if isinstance(model_without_ddp, torchvision.models.detection.KeypointRCNN):
-        iou_types.append("keypoints")
-    return iou_types
+_log = logging.getLogger(__name__)
+
+
+def do_eval(model, data_loader, device):
+    pass
 
 
 @torch.inference_mode()
-def evaluate(model, data_loader, device):
+def evaluate_one_epoch(model, data_loader, device):
     n_threads = torch.get_num_threads()
     torch.set_num_threads(1)
-    cpu_device = torch.device("cpu")
+    cpu_device = torch.device('cpu')
     model.eval()
     metric_logger = MetricLogger(delimiter="  ")
     header = "Test:"
 
-    coco = get_or_create_coco_dataset(data_loader)
+    coco = _get_or_create_coco_dataset(data_loader)
     iou_types = _get_iou_types(model)
     coco_evaluator = CocoEvaluator(coco, iou_types)
 
@@ -73,21 +69,29 @@ def evaluate(model, data_loader, device):
         model_time = time.time()
         outputs = model(images, targets)
 
-        outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+        outputs = [
+            {k:v.to(cpu_device) for k, v in t.items()}
+            for t in outputs
+        ]
         model_time = time.time() - model_time
 
-        res = {target["image_id"].item(): output for target, output in zip(targets, outputs)}
+        res = {
+            target['image_id'].item():output
+            for target, output in zip(targets, outputs
+        )}
         evaluator_time = time.time()
         coco_evaluator.update(res)
         evaluator_time = time.time() - evaluator_time
-        metric_logger.update(model_time=model_time, evaluator_time=evaluator_time)
+        metric_logger.update(
+            model_time=model_time, evaluator_time=evaluator_time
+        )
 
-    # gather the stats from all processes
+    # Gather the stats from all processes.
     metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
+    _log.info("Averaged stats:", metric_logger)
     coco_evaluator.synchronize_between_processes()
 
-    # accumulate predictions from all images
+    # Accumulate predictions from all images.
     coco_evaluator.accumulate()
     coco_evaluator.summarize()
     torch.set_num_threads(n_threads)
@@ -96,7 +100,19 @@ def evaluate(model, data_loader, device):
 
 
 @functools.lru_cache(typed=True)
-def get_or_create_coco_dataset(data_loader):
+def _get_or_create_coco_dataset(data_loader):
     dataset = data_loader.dataset
     coco = get_coco_api_from_dataset(dataset)
     return coco
+
+
+def _get_iou_types(model):
+    model_without_ddp = model
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        model_without_ddp = model.module
+    iou_types = ['bbox']
+    if isinstance(model_without_ddp, torchvision.models.detection.MaskRCNN):
+        iou_types.append('segm')
+    if isinstance(model_without_ddp, torchvision.models.detection.KeypointRCNN):
+        iou_types.append('keypoints')
+    return iou_types

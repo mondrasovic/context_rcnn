@@ -1,5 +1,6 @@
 import copy
 import io
+import logging
 from contextlib import redirect_stdout
 
 import numpy as np
@@ -9,6 +10,9 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 from .utils import all_gather
+
+
+_log = logging.getLogger(__name__)
 
 
 class CocoEvaluator:
@@ -32,7 +36,9 @@ class CocoEvaluator:
         for iou_type in self.iou_types:
             results = self.prepare(predictions, iou_type)
             with redirect_stdout(io.StringIO()):
-                coco_dt = COCO.loadRes(self.coco_gt, results) if results else COCO()
+                coco_dt = (
+                    COCO.loadRes(self.coco_gt, results) if results else COCO()
+                )
             coco_eval = self.coco_eval[iou_type]
 
             coco_eval.cocoDt = coco_dt
@@ -43,8 +49,13 @@ class CocoEvaluator:
 
     def synchronize_between_processes(self):
         for iou_type in self.iou_types:
-            self.eval_imgs[iou_type] = np.concatenate(self.eval_imgs[iou_type], 2)
-            create_common_coco_eval(self.coco_eval[iou_type], self.img_ids, self.eval_imgs[iou_type])
+            self.eval_imgs[iou_type] = np.concatenate(
+                self.eval_imgs[iou_type], 2
+            )
+            create_common_coco_eval(
+                self.coco_eval[iou_type], self.img_ids,
+                self.eval_imgs[iou_type]
+            )
 
     def accumulate(self):
         for coco_eval in self.coco_eval.values():
@@ -52,7 +63,7 @@ class CocoEvaluator:
 
     def summarize(self):
         for iou_type, coco_eval in self.coco_eval.items():
-            print(f"IoU metric: {iou_type}")
+            _log.info(f"IoU metric: {iou_type}")
             coco_eval.summarize()
 
     def prepare(self, predictions, iou_type):
@@ -104,7 +115,12 @@ class CocoEvaluator:
             labels = prediction["labels"].tolist()
 
             rles = [
-                mask_util.encode(np.array(mask[0, :, :, np.newaxis], dtype=np.uint8, order="F"))[0] for mask in masks
+                mask_util.encode(
+                    np.array(
+                        mask[0, :, :, np.newaxis], dtype=np.uint8, order="F"
+                    )
+                )[0]
+                for mask in masks
             ]
             for rle in rles:
                 rle["counts"] = rle["counts"].decode("utf-8")
@@ -169,7 +185,7 @@ def merge(img_ids, eval_imgs):
     merged_img_ids = np.array(merged_img_ids)
     merged_eval_imgs = np.concatenate(merged_eval_imgs, 2)
 
-    # keep only unique (and in sorted order) images
+    # Keep only unique (and in sorted order) images.
     merged_img_ids, idx = np.unique(merged_img_ids, return_index=True)
     merged_eval_imgs = merged_eval_imgs[..., idx]
 
@@ -189,4 +205,10 @@ def create_common_coco_eval(coco_eval, img_ids, eval_imgs):
 def evaluate(imgs):
     with redirect_stdout(io.StringIO()):
         imgs.evaluate()
-    return imgs.params.imgIds, np.asarray(imgs.evalImgs).reshape(-1, len(imgs.params.areaRng), len(imgs.params.imgIds))
+    
+    return (
+        imgs.params.imgIds,
+        np.asarray(imgs.evalImgs).reshape(
+            -1, len(imgs.params.areaRng), len(imgs.params.imgIds)
+        )
+    )

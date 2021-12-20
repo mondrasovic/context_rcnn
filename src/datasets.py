@@ -183,8 +183,8 @@ class UADetracContextDetectionDataset(torch.utils.data.Dataset):
 
             image_idx_gen = itertools.count()
 
-            for image_num, image_file_path in enumerate(
-                self._iter_seq_image_file_paths(seq_dir)
+            for image_num, image_file_path in self._iter_seq_image_file_paths(
+                seq_dir
             ):
                 boxes = image_boxes_map.get(image_num)
                 if boxes is not None:

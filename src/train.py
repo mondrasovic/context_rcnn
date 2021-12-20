@@ -23,13 +23,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
 import math
+import logging
 import os
 import sys
 
 import torch
 
 from .utils import MetricLogger, SmoothedValue, reduce_dict, to_device
-from .eval import evaluate
+from .eval import evaluate_one_epoch
+
+
+_log = logging.getLogger(__name__)
 
 
 def do_train(
@@ -66,7 +70,7 @@ def do_train(
             )
         
         if (data_loader_va is not None) and ((epoch % eval_freq) == 0):
-            evaluate(model, data_loader_va, device=device)
+            evaluate_one_epoch(model, data_loader_va, device=device)
 
 
 def _train_one_epoch(
@@ -106,8 +110,8 @@ def _train_one_epoch(
         loss_value = losses_reduced.item()
 
         if not math.isfinite(loss_value):
-            print(f"Loss is {loss_value}, stopping training")
-            print(loss_dict_reduced)
+            _log.info(f"Loss is {loss_value}, stopping training")
+            _log.info(loss_dict_reduced)
             sys.exit(1)
 
         optimizer.zero_grad()
