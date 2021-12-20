@@ -45,10 +45,12 @@ def evaluate(model, data_loader, device):
     metric_logger = MetricLogger(delimiter="  ")
     header = "Test:"
 
+    print("Initializing COCO-like dataset.")
     coco = _get_or_create_coco_dataset(data_loader)
     iou_types = _get_iou_types(model)
     coco_evaluator = CocoEvaluator(coco, iou_types)
 
+    print("Processing evaluation dataset.")
     for images, targets in metric_logger.log_every(data_loader, 100, header):
         images = to_device(images, device)
         targets = [

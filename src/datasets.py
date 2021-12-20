@@ -357,12 +357,18 @@ def make_dataset(cfg, *, train=True):
     return dataset
 
 
-def make_data_loader(cfg, dataset, collate_fn=collate_context_images_batch):
+def make_data_loader(
+    cfg,
+    dataset,
+    train=True,
+    collate_fn=collate_context_images_batch
+):
     pin_memory = torch.cuda.is_available()
+    shuffle = cfg.DATA_LOADER.SHUFFLE if train else False
     
     data_loader = DataLoader(
         dataset, batch_size=cfg.DATA_LOADER.BATCH_SIZE,
-        shuffle=cfg.DATA_LOADER.SHUFFLE,
+        shuffle=shuffle,
         num_workers=cfg.DATA_LOADER.N_WORKERS,
         collate_fn=collate_fn, pin_memory=pin_memory
     )

@@ -86,9 +86,11 @@ def main():
 
     device = torch.device(cfg.DEVICE)
 
+    print("Loading evaluation dataset.")
     dataset_te = make_dataset(cfg, train=False)
-    data_loader_te = make_data_loader(cfg, dataset_te)
+    data_loader_te = make_data_loader(cfg, dataset_te, train=False)
 
+    print("Creating model.")
     model = make_object_detection_model(cfg).to(device)
 
     optimizer = make_optimizer(cfg, model)
@@ -96,6 +98,7 @@ def main():
 
     checkpoint_file_path = args.checkpoint_file
     if checkpoint_file_path:
+        print("Restoring from checkpoint: " + checkpoint_file_path)
         start_epoch = load_checkpoint(
             checkpoint_file_path, model, optimizer, lr_scheduler
         )
@@ -103,6 +106,7 @@ def main():
         start_epoch = 1
     
     if args.test_only:
+        print("Starting evaluation.")
         evaluate(model, data_loader_te, device)
     else:
         n_epochs = cfg.TRAIN.N_EPOCHS
@@ -110,9 +114,11 @@ def main():
         checkpoint_save_freq = cfg.TRAIN.CHECKPOINT_SAVE_FREQ
         print_freq = cfg.TRAIN.PRINT_FREQ
 
+        print("Loading training dataset.")
         dataset_tr = make_dataset(cfg, train=True)
-        data_loader_tr = make_data_loader(cfg, dataset_tr)
+        data_loader_tr = make_data_loader(cfg, dataset_tr, train=True)
 
+        print("Starting training.")
         do_train(
             model, optimizer, lr_scheduler, data_loader_tr, device, n_epochs,
             start_epoch, data_loader_te, eval_freq, args.checkpoints_dir,
