@@ -33,7 +33,7 @@ _C.DEVICE = 'cuda:0'
 # ------------------------------------------------------------------------------
 _C.DATASET = CN()
 
-_C.DATASET.ROOT_PATH = '../../datasets/UA-DETRAC'
+_C.DATASET.ROOT_PATH = '../../../datasets/UA-DETRAC'
 
 _C.DATASET.PAST_CONTEXT = 0
 _C.DATASET.FUTURE_CONTEXT = 0
@@ -52,9 +52,9 @@ _C.DATASET.AUG.HUE = 0.1
 # ------------------------------------------------------------------------------
 _C.DATA_LOADER = CN()
 
-_C.DATA_LOADER.BATCH_SIZE = 8
+_C.DATA_LOADER.BATCH_SIZE = 2
 _C.DATA_LOADER.SHUFFLE = True
-_C.DATA_LOADER.N_WORKERS = 4
+_C.DATA_LOADER.N_WORKERS = 2
 
 # ------------------------------------------------------------------------------
 _C.MODEL = CN()
@@ -89,7 +89,7 @@ _C.TRAIN = CN()
 
 _C.TRAIN.N_EPOCHS = 30
 _C.TRAIN.EVAL_FREQ = 1
-_C.TRAIN.PRINT_FREQ = 20
+_C.TRAIN.PRINT_FREQ = 10
 _C.TRAIN.CHECKPOINT_SAVE_FREQ = 1
 # ------------------------------------------------------------------------------ 
 cfg = _C

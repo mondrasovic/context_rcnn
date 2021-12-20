@@ -23,17 +23,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
 import math
-import logging
-import os
 import sys
 
 import torch
 
-from .utils import MetricLogger, SmoothedValue, reduce_dict, to_device
-from .eval import evaluate_one_epoch
-
-
-_log = logging.getLogger(__name__)
+from .utils import (
+    MetricLogger, SmoothedValue, reduce_dict, to_device, save_checkpoint
+)
+from .eval import evaluate
 
 
 def do_train(
@@ -43,21 +40,14 @@ def do_train(
     data_loader,
     device,
     n_epochs,
+    start_epoch=1,
     data_loader_va=None,
     eval_freq=1,
     checkpoints_dir_path=None,
-    checkpoint_file_path=None,
     checkpoint_save_freq=None,
     print_freq=10,
     log_dir=None
 ):
-    start_epoch = 1
-
-    if checkpoint_file_path:
-        start_epoch = _load_checkpoint(
-            checkpoint_file_path, model, optimizer, lr_scheduler
-        )
-
     for epoch in range(start_epoch, n_epochs + 1):
         _train_one_epoch(
             model, optimizer, data_loader, device, epoch, n_epochs, print_freq
@@ -65,12 +55,12 @@ def do_train(
         lr_scheduler.step()
 
         if checkpoints_dir_path and ((epoch % checkpoint_save_freq) == 0):
-            _save_checkpoint(
+            save_checkpoint(
                 checkpoints_dir_path, model, optimizer, lr_scheduler, epoch
             )
         
         if (data_loader_va is not None) and ((epoch % eval_freq) == 0):
-            evaluate_one_epoch(model, data_loader_va, device=device)
+            evaluate(model, data_loader_va, device=device)
 
 
 def _train_one_epoch(
@@ -110,8 +100,8 @@ def _train_one_epoch(
         loss_value = losses_reduced.item()
 
         if not math.isfinite(loss_value):
-            _log.info(f"Loss is {loss_value}, stopping training")
-            _log.info(loss_dict_reduced)
+            print(f"Loss is {loss_value}, stopping training")
+            print(loss_dict_reduced)
             sys.exit(1)
 
         optimizer.zero_grad()
@@ -127,35 +117,3 @@ def _train_one_epoch(
         metric_logger.update(lr=optimizer.param_groups[0]['lr'])
 
     return metric_logger
-
-
-def _save_checkpoint(
-    checkpoints_dir_path,
-    model,
-    optimizer,
-    lr_scheduler,
-    epoch
-):
-    checkpoint = {
-        'model': model.state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'lr_scheduler': lr_scheduler.state_dict(),
-        'epoch': epoch,
-    }
-
-    file_name = f'checkpoint_{epoch:03d}.pth'
-    checkpoint_file_path = os.path.join(checkpoints_dir_path, file_name)
-    
-    os.makedirs(checkpoints_dir_path, exist_ok=True)
-    torch.save(checkpoint, checkpoint_file_path)
-
-
-def _load_checkpoint(checkpoint_file_path, model, optimizer, lr_scheduler):
-    checkpoint = torch.load(checkpoint_file_path)
-
-    model.load_state_dict(checkpoint['model'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-    start_epoch = checkpoint['epoch'] + 1
-
-    return start_epoch

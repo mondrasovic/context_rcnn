@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python -m src.main --checkpoints-dir ./checkpoints_fasterrcnn
+python -u -m src.main --checkpoints-dir ./checkpoints_tmp | tee tmp_log.log

@@ -1,6 +1,5 @@
 import copy
 import io
-import logging
 from contextlib import redirect_stdout
 
 import numpy as np
@@ -10,9 +9,6 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 from .utils import all_gather
-
-
-_log = logging.getLogger(__name__)
 
 
 class CocoEvaluator:
@@ -63,7 +59,7 @@ class CocoEvaluator:
 
     def summarize(self):
         for iou_type, coco_eval in self.coco_eval.items():
-            _log.info(f"IoU metric: {iou_type}")
+            print(f"IoU metric: {iou_type}")
             coco_eval.summarize()
 
     def prepare(self, predictions, iou_type):

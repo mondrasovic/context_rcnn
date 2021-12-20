@@ -26,7 +26,6 @@
 # https://github.com/pytorch/vision/blob/main/references/detection/utils.py
 
 import functools
-import logging
 import time
 
 import torch
@@ -37,15 +36,8 @@ from .coco_utils import get_coco_api_from_dataset
 from .coco_eval import CocoEvaluator
 
 
-_log = logging.getLogger(__name__)
-
-
-def do_eval(model, data_loader, device):
-    pass
-
-
-@torch.inference_mode()
-def evaluate_one_epoch(model, data_loader, device):
+@torch.no_grad()
+def evaluate(model, data_loader, device):
     n_threads = torch.get_num_threads()
     torch.set_num_threads(1)
     cpu_device = torch.device('cpu')
@@ -85,10 +77,10 @@ def evaluate_one_epoch(model, data_loader, device):
         metric_logger.update(
             model_time=model_time, evaluator_time=evaluator_time
         )
-
+    
     # Gather the stats from all processes.
     metric_logger.synchronize_between_processes()
-    _log.info("Averaged stats:", metric_logger)
+    print("Averaged stats:", metric_logger)
     coco_evaluator.synchronize_between_processes()
 
     # Accumulate predictions from all images.

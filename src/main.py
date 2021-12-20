@@ -22,8 +22,8 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
+import contextlib
 import argparse
-import logging
 import os
 import sys
 
@@ -34,6 +34,8 @@ from .datasets import make_dataset, make_data_loader
 from .models import make_object_detection_model
 from .optim import make_optimizer, make_lr_scheduler
 from .train import do_train
+from .eval import evaluate
+from .utils import load_checkpoint
 
 
 def parse_args():
@@ -56,7 +58,7 @@ def parse_args():
         help="specific checkpoint file to restore the model training or "
         "evaluating from"
     )
-    parser(
+    parser.add_argument(
         '--test-only', action='store_true',
         help="Executes model evaluation from a given checkpoint file."
     )
@@ -80,34 +82,42 @@ def main():
         cfg.merge_from_list(args.opts)
     cfg.freeze()
 
-    log_file_path = os.path.join(args.log_dir, 'logs.log')
-    logging.basicConfig(
-        filename=log_file_path, filemode='w',
-        format='%(asctime)s %(levelname)s:%(message)s', level=logging.DEBUG
-    )
-    
+    os.makedirs(args.log_dir, exist_ok=True)
+
     device = torch.device(cfg.DEVICE)
 
-    dataset_tr = make_dataset(cfg, train=True)
-    dataset_va = make_dataset(cfg, train=False)
-    data_loader_tr = make_data_loader(cfg, dataset_tr)
-    data_loader_va = make_data_loader(cfg, dataset_va)
+    dataset_te = make_dataset(cfg, train=False)
+    data_loader_te = make_data_loader(cfg, dataset_te)
 
     model = make_object_detection_model(cfg).to(device)
 
     optimizer = make_optimizer(cfg, model)
     lr_scheduler = make_lr_scheduler(cfg, optimizer)
 
-    n_epochs = cfg.TRAIN.N_EPOCHS
-    eval_freq = cfg.TRAIN.EVAL_FREQ
-    checkpoint_save_freq = cfg.TRAIN.CHECKPOINT_SAVE_FREQ
-    print_freq = cfg.TRAIN.PRINT_FREQ
+    checkpoint_file_path = args.checkpoint_file
+    if checkpoint_file_path:
+        start_epoch = load_checkpoint(
+            checkpoint_file_path, model, optimizer, lr_scheduler
+        )
+    else:
+        start_epoch = 1
+    
+    if args.test_only:
+        evaluate(model, data_loader_te, device)
+    else:
+        n_epochs = cfg.TRAIN.N_EPOCHS
+        eval_freq = cfg.TRAIN.EVAL_FREQ
+        checkpoint_save_freq = cfg.TRAIN.CHECKPOINT_SAVE_FREQ
+        print_freq = cfg.TRAIN.PRINT_FREQ
 
-    do_train(
-        model, optimizer, lr_scheduler, data_loader_tr, device, n_epochs,
-        data_loader_va, eval_freq, args.checkpoints_dir, args.checkpoint_file,
-        checkpoint_save_freq, print_freq, args.log_dir
-    )
+        dataset_tr = make_dataset(cfg, train=True)
+        data_loader_tr = make_data_loader(cfg, dataset_tr)
+
+        do_train(
+            model, optimizer, lr_scheduler, data_loader_tr, device, n_epochs,
+            start_epoch, data_loader_te, eval_freq, args.checkpoints_dir,
+            checkpoint_save_freq, print_freq, args.log_dir
+        )
 
     return 0
 

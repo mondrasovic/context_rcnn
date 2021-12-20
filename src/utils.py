@@ -27,16 +27,12 @@
 
 import datetime
 import errno
-import logging
 import os
 import time
 from collections import defaultdict, deque
 
 import torch
 import torch.distributed as dist
-
-
-_log = logging.getLogger(__name__)
 
 
 class SmoothedValue:
@@ -207,7 +203,7 @@ class MetricLogger:
                 eta_seconds = iter_time.global_avg * (len(iterable) - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
-                    _log.info(
+                    print(
                         log_msg.format(
                             i,
                             len(iterable),
@@ -219,7 +215,7 @@ class MetricLogger:
                         )
                     )
                 else:
-                    _log.info(
+                    print(
                         log_msg.format(
                             i, len(iterable), eta=eta_string, meters=str(self), time=str(iter_time), data=str(data_time)
                         )
@@ -228,7 +224,7 @@ class MetricLogger:
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        _log.info(f"{header} Total time: {total_time_str} ({total_time / len(iterable):.4f} s / it)")
+        print(f"{header} Total time: {total_time_str} ({total_time / len(iterable):.4f} s / it)")
 
 
 def collate_fn(batch):
@@ -297,7 +293,7 @@ def init_distributed_mode(args):
         args.rank = int(os.environ["SLURM_PROCID"])
         args.gpu = args.rank % torch.cuda.device_count()
     else:
-        _log.info("Not using distributed mode")
+        print("Not using distributed mode")
         args.distributed = False
         return
 
@@ -305,9 +301,10 @@ def init_distributed_mode(args):
 
     torch.cuda.set_device(args.gpu)
     args.dist_backend = "nccl"
-    _log.info(f"| distributed init (rank {args.rank}): {args.dist_url}", flush=True)
+    print(f"| distributed init (rank {args.rank}): {args.dist_url}", flush=True)
     torch.distributed.init_process_group(
-        backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank
+        backend=args.dist_backend, init_method=args.dist_url,
+        world_size=args.world_size, rank=args.rank
     )
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
@@ -321,3 +318,35 @@ def to_device(val, device):
             elem = val[i]
             val[i] = to_device(elem, device)
     return val
+
+
+def save_checkpoint(
+    checkpoints_dir_path,
+    model,
+    optimizer,
+    lr_scheduler,
+    epoch
+):
+    checkpoint = {
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'lr_scheduler': lr_scheduler.state_dict(),
+        'epoch': epoch,
+    }
+
+    file_name = f'checkpoint_{epoch:03d}.pth'
+    checkpoint_file_path = os.path.join(checkpoints_dir_path, file_name)
+    
+    os.makedirs(checkpoints_dir_path, exist_ok=True)
+    torch.save(checkpoint, checkpoint_file_path)
+
+
+def load_checkpoint(checkpoint_file_path, model, optimizer, lr_scheduler):
+    checkpoint = torch.load(checkpoint_file_path)
+
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+    start_epoch = checkpoint['epoch'] + 1
+
+    return start_epoch
